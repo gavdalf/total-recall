@@ -75,3 +75,16 @@ See [docs/architecture.md](docs/architecture.md) for the full breakdown.
 ## License
 
 MIT
+
+## Session Configuration Tip
+
+With the memory system running, we recommend extending your idle timeouts (the observer preserves context across resets):
+
+```json
+"session": {
+  "reset": { "mode": "daily", "atHour": 5, "idleMinutes": 360 },
+  "resetByType": { "group": { "mode": "daily", "atHour": 5, "idleMinutes": 180 } }
+}
+```
+
+See [docs/architecture.md](docs/architecture.md) for the full rationale.

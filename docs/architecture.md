@@ -81,3 +81,37 @@ Compaction only affects the in-memory conversation transcript. Our files live on
 2. Multiple sessions can share the same memory files
 3. The files are human-readable and debuggable
 4. No changes to OpenClaw core required
+
+---
+
+## Recommended Session Configuration
+
+With the memory system active, you can safely extend your session idle timeouts. The observer captures everything important, so a fresh session start loads curated context rather than raw conversation noise.
+
+**Suggested config (openclaw.json):**
+
+```json
+{
+  "session": {
+    "reset": {
+      "mode": "daily",
+      "atHour": 5,
+      "idleMinutes": 360
+    },
+    "resetByType": {
+      "group": {
+        "mode": "daily",
+        "atHour": 5,
+        "idleMinutes": 180
+      }
+    }
+  }
+}
+```
+
+**Why these values:**
+- **Daily reset at 5am** — Think of it like sleep. Your agent consolidates memories overnight and wakes up fresh with everything important loaded from observations. Extending to weekly/monthly just accumulates noise and hits compaction more often.
+- **DM idle: 6 hours** (up from default 2) — Gives you continuity during the day. Step away for dinner, come back, session is still alive.
+- **Group idle: 3 hours** (up from default 1) — Less aggressive timeout for group conversations.
+
+**Why not longer?** Every fresh session loads the curated observation file (~4.5% of context) instead of carrying around hours of raw conversation noise. Daily resets are a feature, not a bug — they're the "sleep cycle" that keeps your agent's memory healthy.
