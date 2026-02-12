@@ -23,6 +23,16 @@ Five layers of protection that work **with** (not against) native compaction:
 
 ## Quick Start
 
+### Option A: Let your agent install it (recommended) 🤖
+
+Just tell your OpenClaw agent:
+
+> Read https://raw.githubusercontent.com/gavdalf/openclaw-memory/main/INSTALL-AGENT.md and follow the instructions to install OpenClaw Memory.
+
+Your agent will read the guide, install the scripts, configure the cron jobs, and set up the pre-compaction hooks — all by itself. You just approve the steps.
+
+### Option B: Install manually
+
 ```bash
 # 1. Clone this repo
 git clone https://github.com/gavdalf/openclaw-memory.git
