@@ -1,111 +1,80 @@
-# OpenClaw Memory — Five-Layer Memory Protection
+# 🧠 Total Recall — Autonomous Agent Memory
 
-> Your AI has the same attention problem you do — and we fixed it the same way your brain does.
+**The only memory system that watches on its own.**
 
-A drop-in memory system for [OpenClaw](https://openclaw.ai) agents that eliminates post-compaction amnesia through continuous observation, reflection, and reactive triggers.
+No database. No vectors. No manual saves. Just an LLM observer that compresses your conversations into prioritised notes, consolidates when they grow, and recovers anything missed. Five layers of redundancy, zero maintenance. ~$0.10/month.
 
-## The Problem
+While other memory skills ask you to remember to remember, this one just pays attention.
 
-OpenClaw's context compaction is lossy by design. It takes 200k tokens of conversation and crushes it to ~10-20k tokens of summary. Specifics get lost: exact numbers, subtle decisions, the reasoning behind choices.
+## How It Works
 
-## The Solution
+```
+Layer 1: Observer (cron, every 15 min)
+    ↓ compresses recent messages → observations.md
+Layer 2: Reflector (auto-triggered when observations > 8000 words)
+    ↓ consolidates, removes superseded info → 40-60% reduction
+Layer 3: Session Recovery (runs on every /new or /reset)
+    ↓ catches any session the Observer missed
+Layer 4: Reactive Watcher (inotify daemon, Linux only)
+    ↓ triggers Observer after 40+ new JSONL writes, 5-min cooldown
+Layer 5: Pre-compaction hook (memoryFlush)
+    ↓ emergency capture before OpenClaw compacts context
+```
 
-Five layers of protection that work **with** (not against) native compaction:
+Inspired by how human memory works during sleep — the hippocampus captures experiences, and during consolidation, important memories are strengthened while noise is discarded.
 
-1. ⏰ **Observer Cron** (every 15 min) — Continuously extracts durable facts from session transcripts
-2. 🎯 **Reactive Watcher** (inotify/fswatch) — Fires within seconds during heavy conversations
-3. 🛡️ **Pre-Compaction Hook** (memoryFlush) — Emergency capture right before compaction fires
-4. 📝 **Session Startup** — Loads all saved memory at the start of every new session
-5. 🔄 **Session Recovery** (startup check) — Catches any observations missed by the watcher during manual resets
-
-**Cost:** ~$0.10-0.20/month using Gemini 2.5 Flash via OpenRouter. Also works with **local models** (llama.cpp, Ollama, vLLM) — see [FAQ](docs/faq.md).
-**Context overhead:** ~4.5% of window (saves 20-30% that would be wasted re-explaining).
-
-## Quick Start
-
-### Option A: Let your agent install it (recommended) 🤖
-
-Just tell your OpenClaw agent:
-
-> Read https://raw.githubusercontent.com/gavdalf/openclaw-memory/main/INSTALL-AGENT.md and follow the instructions to install OpenClaw Memory.
-
-Your agent will read the guide, install the scripts, configure the cron jobs, and set up the pre-compaction hooks — all by itself. You just approve the steps.
-
-### Option B: Install manually
+## Install via ClawdHub
 
 ```bash
-# 1. Clone this repo
-git clone https://github.com/gavdalf/openclaw-memory.git
-cd openclaw-memory
-
-# 2. Run the installer
-./install.sh
-
-# 3. Done — memory system is active
+clawdhub install total-recall
+bash skills/total-recall/scripts/setup.sh
 ```
 
-## Architecture
+## Install from GitHub
 
-```
-Session JSONL files (raw transcripts)
-    ↓ (every 15 min + reactive triggers + pre-compaction + session recovery)
-Observer Agent (compress via LLM → observations.md)
-    ↓ (when observations > 8000 words)
-Reflector Agent (consolidate → compressed observations.md)
-    ↓ (session startup)
-Agent loads: observations.md + favorites.md + daily memory
+```bash
+git clone https://github.com/gavdalf/total-recall.git
+cd total-recall
+bash scripts/setup.sh
 ```
 
-See [docs/architecture.md](docs/architecture.md) for the full breakdown.
+See [SKILL.md](SKILL.md) for full documentation, configuration, and platform support.
 
-## Requirements
+## What's Inside
 
-- OpenClaw (any recent version)
-- bash, jq, curl
-- An LLM API key (OpenRouter recommended — Gemini 2.5 Flash is ~$0.001/run)
-- `inotify-tools` (Linux) or `fswatch` (macOS) for the reactive watcher
+| Component | Description |
+|-----------|-------------|
+| `scripts/observer-agent.sh` | Compresses recent conversations via LLM |
+| `scripts/reflector-agent.sh` | Consolidates when observations grow large |
+| `scripts/session-recovery.sh` | Catches missed sessions on /new |
+| `scripts/observer-watcher.sh` | Reactive inotify trigger (Linux) |
+| `scripts/setup.sh` | One-command setup (dirs, watcher service) |
+| `scripts/_compat.sh` | Cross-platform helpers (Linux + macOS) |
+| `prompts/` | LLM system prompts for observer + reflector |
+| `dream-cycle/` | Total Recall: Dream Cycle (coming soon) |
 
-## Best Practice: Real-Time Task Logging (Layer 6)
+## Platform Support
 
-The five automated layers capture **durable facts** — names, preferences, decisions. But they can miss **active task state**: what you're currently doing, what's been approved, what step is next.
+| Platform | Observer + Reflector + Recovery | Reactive Watcher |
+|----------|-------------------------------|-----------------|
+| Linux | ✅ Full support | ✅ With inotify-tools |
+| macOS | ✅ Full support | ❌ Cron-only mode |
 
-For maximum resilience, teach your agent to write task state to disk **as it happens**, not just when the automated layers fire:
+## Cost
 
-```markdown
-# Add this to your AGENTS.md or equivalent system prompt:
+~$0.05–0.15/month using Gemini 2.5 Flash via OpenRouter.
 
-When the user approves an action, when you complete a significant step, 
-or when you receive important details mid-task, immediately append a brief 
-note to today's memory file (memory/YYYY-MM-DD.md). Don't wait for the 
-observer or the flush.
-```
+## Total Recall: Dream Cycle
 
-**Why:** If compaction fires mid-task, the automated summary keeps broad strokes but loses specifics. With task state already on disk, the post-compaction session reads the daily file and picks up exactly where things stand.
+The overnight autonomous self-improvement system — while you sleep, your agent reviews its own performance, identifies improvements, and executes fixes. Coming soon.
 
-**Cost:** ~50-100 tokens per write. Negligible compared to the tokens lost re-explaining context after compaction.
+## Articles
 
-Think of it as: the five layers are your safety net. Real-time logging is the discipline that means you rarely need the net.
-
-## Inspired By
-
-- [Mastra Observational Memory](https://mastra.ai) (94.87% on LongMemEval benchmark)
-- Stanford Generative Agents (Park et al., 2023)
-- MemGPT/Letta tiered memory architecture
-- Cognitive science: hippocampal replay during sleep transitions
+- [Your AI Has an Attention Problem](https://gavlahh.substack.com/p/your-ai-has-an-attention-problem) — How and why we built Total Recall
+- [I Published an AI Memory Fix. Then I Found the Hole.](https://gavlahh.substack.com/p/i-published-an-ai-memory-fix-then) — Finding and fixing our own blind spots
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
 
-## Session Configuration Tip
-
-With the memory system running, we recommend extending your idle timeouts (the observer preserves context across resets):
-
-```json
-"session": {
-  "reset": { "mode": "daily", "atHour": 5, "idleMinutes": 360 },
-  "resetByType": { "group": { "mode": "daily", "atHour": 5, "idleMinutes": 180 } }
-}
-```
-
-See [docs/architecture.md](docs/architecture.md) for the full rationale.
+*"Get your ass to Mars." — Well, get your agent's memory to work.*

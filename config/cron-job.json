@@ -1,12 +1,16 @@
 {
-  "_comment": "Create this cron job via OpenClaw cron tool: cron(action='add', job={...})",
   "name": "memory-observer",
-  "schedule": { "kind": "cron", "expr": "*/15 * * * *" },
-  "payload": {
-    "kind": "agentTurn",
-    "message": "Run the memory observer: exec bash ~/clawd/scripts/observer.sh\n\nAfter it completes, check ~/clawd/memory/observations.md word count. If over 8000 words, also run: exec bash ~/clawd/scripts/reflector.sh\n\nReply with NO_REPLY when done.",
-    "timeoutSeconds": 120
+  "schedule": {
+    "kind": "cron",
+    "expr": "*/15 * * * *",
+    "tz": "Europe/London"
   },
   "sessionTarget": "isolated",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "Run the Total Recall observer: OPENCLAW_WORKSPACE=~/clawd bash ~/clawd/skills/total-recall/scripts/observer-agent.sh\n\nReply with the script output only.",
+    "timeoutSeconds": 120,
+    "model": "openrouter/google/gemini-2.5-flash"
+  },
   "delivery": { "mode": "none" }
 }

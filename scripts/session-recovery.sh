@@ -1,17 +1,19 @@
-#!/bin/bash
-# Session Recovery — checks if previous session was observed, captures if not
-# Run at session startup as 5th layer of redundancy
-# Works without git — uses session files and hash tracking
+#!/usr/bin/env bash
+# Session Recovery — catches missed sessions on /new or /reset
+# Part of Total Recall skill
 
 set -euo pipefail
 
-OPENCLAW_DIR="${OPENCLAW_DIR:-$HOME/.openclaw}"
-WORKSPACE_DIR="${WORKSPACE_DIR:-$HOME/clawd}"
-SESSIONS_DIR="${OPENCLAW_DIR}/agents/main/sessions"
-HASH_FILE="${WORKSPACE_DIR}/memory/.observer-last-hash"
-RECOVERY_LOG="${WORKSPACE_DIR}/logs/session-recovery.log"
+SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "$SKILL_DIR/scripts/_compat.sh"
 
-mkdir -p "${WORKSPACE_DIR}/logs"
+WORKSPACE="${OPENCLAW_WORKSPACE:-$(cd "$SKILL_DIR/../.." && pwd)}"
+MEMORY_DIR="${MEMORY_DIR:-$WORKSPACE/memory}"
+SESSIONS_DIR="${SESSIONS_DIR:-$HOME/.openclaw/agents/main/sessions}"
+HASH_FILE="$MEMORY_DIR/.observer-last-hash"
+RECOVERY_LOG="$WORKSPACE/logs/session-recovery.log"
+
+mkdir -p "$WORKSPACE/logs"
 
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$RECOVERY_LOG"
@@ -19,23 +21,29 @@ log() {
 
 log "Session recovery check starting"
 
-# Find the most recent session file (excluding current)
-LAST_SESSION=$(ls -t "$SESSIONS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
+# Find most recent session file (filter out subagent/cron/topic)
+LAST_SESSION=""
+for f in $(find "$SESSIONS_DIR" -maxdepth 1 -name "*.jsonl" -type f 2>/dev/null | sort -r); do
+  BASENAME=$(basename "$f" .jsonl)
+  if echo "$BASENAME" | grep -qE "(topic|subagent|cron)"; then
+    continue
+  fi
+  LAST_SESSION="$f"
+  break
+done
 
 if [ -z "$LAST_SESSION" ]; then
-  log "No session files found"
+  log "No main session files found"
   exit 0
 fi
 
-# Calculate hash of last 50 lines (recent activity)
-CURRENT_HASH=$(tail -50 "$LAST_SESSION" 2>/dev/null | md5sum | cut -d' ' -f1 || echo "")
+CURRENT_HASH=$(tail -50 "$LAST_SESSION" 2>/dev/null | md5_hash || echo "")
 
 if [ -z "$CURRENT_HASH" ]; then
   log "Could not hash session file"
   exit 0
 fi
 
-# Check if this session was already observed
 if [ -f "$HASH_FILE" ]; then
   STORED_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
   if [ "$CURRENT_HASH" = "$STORED_HASH" ]; then
@@ -44,17 +52,14 @@ if [ -f "$HASH_FILE" ]; then
   fi
 fi
 
-# Session changed but wasn't observed — run observer in recovery mode
 log "Unobserved session detected: $(basename "$LAST_SESSION") (hash: ${CURRENT_HASH:0:8})"
 log "Triggering emergency observer capture..."
 
-# Run observer with extended lookback to capture what was missed
-bash "${WORKSPACE_DIR}/scripts/observer.sh" --recover "$LAST_SESSION" 2>/dev/null || {
-  # Fallback: direct capture
-  log "Direct recovery capture..."
-  CUTOFF_ISO=$(date -u -d "4 hours ago" '+%Y-%m-%dT%H:%M:%SZ')
+bash "$SKILL_DIR/scripts/observer-agent.sh" --recover "$LAST_SESSION" 2>/dev/null || {
+  log "Observer recovery failed, attempting direct capture..."
+  CUTOFF_ISO=$(date_minutes_ago 240)
   
-  # Extract messages from the missed session
+  OBSERVATIONS_FILE="$MEMORY_DIR/observations.md"
   RECENT_MESSAGES=$(jq -r --arg cutoff "$CUTOFF_ISO" '
     select(.timestamp != null and (.timestamp > $cutoff)) |
     select(.message.role == "user" or .message.role == "assistant") |
@@ -71,14 +76,13 @@ bash "${WORKSPACE_DIR}/scripts/observer.sh" --recover "$LAST_SESSION" 2>/dev/nul
     ) as $text |
     select($text != "" and ($text | length) > 5) |
     select($text != "HEARTBEAT_OK" and $text != "NO_REPLY") |
-    "[\($who)]: \($text[0:400])"
+    "\($who): \($text[0:400])"
   ' "$LAST_SESSION" 2>/dev/null | head -100 || true)
   
   if [ -n "$RECENT_MESSAGES" ]; then
-    # Append raw to observations with recovery marker
-    echo "" >> "${WORKSPACE_DIR}/memory/observations.md"
-    echo "<!-- Session Recovery Capture: $(date '+%Y-%m-%d %H:%M') -->" >> "${WORKSPACE_DIR}/memory/observations.md"
-    echo "$RECENT_MESSAGES" >> "${WORKSPACE_DIR}/memory/observations.md"
+    echo "" >> "$OBSERVATIONS_FILE"
+    echo "<!-- Session Recovery Capture: $(date '+%Y-%m-%d %H:%M') -->" >> "$OBSERVATIONS_FILE"
+    echo "$RECENT_MESSAGES" >> "$OBSERVATIONS_FILE"
     echo "$CURRENT_HASH" > "$HASH_FILE"
     log "Emergency capture complete ($(echo "$RECENT_MESSAGES" | wc -l) lines)"
   fi
