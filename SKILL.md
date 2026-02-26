@@ -103,7 +103,7 @@ All scripts read from environment variables with sensible defaults:
 | `OBSERVER_LINE_THRESHOLD` | `40` | Lines before reactive trigger (Linux) |
 | `OBSERVER_COOLDOWN_SECS` | `300` | Cooldown between reactive triggers (Linux) |
 | `REFLECTOR_WORD_THRESHOLD` | `8000` | Words before reflector runs |
-| `OPENCLAW_WORKSPACE` | `~/clawd` | Workspace root |
+| `OPENCLAW_WORKSPACE` | `~/your-workspace` | Workspace root |
 
 ## Files Created
 
@@ -268,7 +268,7 @@ research/
 
 **Key insight from research:** Agent capability to use retrieval tools matters more than the retrieval mechanism itself. Simple filesystem tools often beat fancy memory frameworks. This validates our markdown-based approach.
 
-**Accelerated rollout approach (as of 25 Feb):** Dry runs fire at 02:30. Gavin reviews in the morning. Approved packages go LIVE the same morning. Next package runs as dry run that same night. Full Phase 2 target: Sun 1 Mar 02:30.
+**Accelerated rollout approach (as of 25 Feb):** Dry runs fire at 02:30, reviewed in the morning. Approved packages go LIVE the same morning. Next package runs as dry run that same night. Full Phase 2 target: Sun 1 Mar 02:30.
 
 | Phase | Focus | Status |
 |-------|-------|--------|
@@ -276,9 +276,9 @@ research/
 | **Phase 2 — WP0** | Multi-hook generation (4-5 search phrasings per archive) | ✅ LIVE (25 Feb) |
 | **Phase 2 — WP0.5** | Confidence metadata (0.0-1.0 score + source attribution) | ✅ LIVE (25 Feb) |
 | **Phase 2 — WP1** | Type system — 7 memory types + TTL classification | ✅ LIVE (25 Feb) |
-| **Phase 2 — WP3** | Chunking — compress related observations into single entries | 🔨 BUILDING (25 Feb) → DRY RUN Thu 26 Feb 02:30 |
-| **Phase 2 — WP2** | Importance decay — Ebbinghaus curve per memory type | 🔜 DRY RUN Fri 27 Feb 02:30 |
-| **Phase 2 — WP4** | Pattern promotion pipeline — staging proposals for Gavin review | 🔜 DRY RUN Sat 28 Feb 02:30 |
+| **Phase 2 — WP3** | Chunking — compress related observations into single entries | ✅ LIVE (26 Feb) |
+| **Phase 2 — WP2** | Importance decay — Ebbinghaus curve per memory type | 🔜 In development |
+| **Phase 2 — WP4** | Pattern promotion pipeline — staging proposals for human review | 🔜 DRY RUN Sat 28 Feb 02:30 |
 | **Full Phase 2** | All work packages live | 🎯 Target: Sun 1 Mar 02:30 |
 | **Phase 3** | Contradiction detection, retrieval validation loop | Future |
 

@@ -256,7 +256,7 @@ When `DREAM_PHASE >= 2`, generate **4-5 alternative search hooks** for each arch
 **Hook vocabulary guidance:**
 - Technical → Colloquial: "TTS" → "voice", "OAuth" → "login", "cron" → "scheduled task"
 - Solution → Problem: "fixed auth" → "login failed", "token refresh" → "session expired"
-- Specific → General: "Charlotte audiobook" → "daughter audio", "Mac Studio browser" → "desktop browser"
+- Specific → General: "family audiobook" → "audio content", "Mac Studio browser" → "desktop browser"
 - Action → State: "updated config" → "config changed", "killed cron" → "cron disabled"
 
 ### 8) Apply Writes by Mode

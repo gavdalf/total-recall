@@ -117,15 +117,26 @@ export LLM_MODEL="llama-3.3-70b-versatile"
 
 The overnight memory consolidation system. While you sleep, an agent reviews `observations.md`, archives stale items, and adds semantic hooks so nothing useful is actually lost. It keeps your context lean without throwing anything away.
 
-Three nights of data:
+Production results (v1.3.0 Phase 2):
 
-| Night | Mode | Before | After | Reduction | Archived |
-|-------|------|--------|-------|-----------|----------|
-| Night 1 | Dry run | 9,445 tokens | 8,309 tokens | 12% | 53 items |
-| Night 2 | Dry run | 16,900 tokens | 6,800 tokens | 60% | 248 items |
+| Night | Mode | Before | After | Reduction | Notes |
+|-------|------|--------|-------|-----------|-------|
+| Night 1 | Dry run | 9,445 tokens | 8,309 tokens | 12% | 53 items archived |
+| Night 2 | Dry run | 16,900 tokens | 6,800 tokens | 60% | 248 items archived |
 | Night 3 | Live | 11,688 tokens | 2,930 tokens | 75% | 15 items, 0 false archives |
+| Phase 2 live | Chunking + multi-hook | 11,015 tokens | 2,769 tokens | **74.9%** | 6 chunks from 36 observations |
 
 Cost per run: ~$0.003. Models: Claude Sonnet (Dreamer) + Gemini Flash (Observer).
+
+### Phase 2 Features (v1.3.0)
+
+**WP0: Multi-Hook Retrieval** — 4-5 alternative semantic hooks per archived item. Addresses vocabulary mismatch so searches using different words still find the memory.
+
+**WP0.5: Confidence Scoring** — Every observation gets a confidence score (0.0–1.0) and source type (`explicit`, `implicit`, `inference`, `weak`, `uncertain`). High-confidence items are preserved longer.
+
+**WP1: Memory Type System** — 7 types with per-type TTLs: `event` (14d), `fact` (90d), `preference` (180d), `goal` (365d), `habit` (365d), `rule` (never), `context` (30d). Embedded as HTML metadata comments, invisible in rendered markdown.
+
+**WP3: Observation Chunking** — Clusters of 3+ related observations are compressed into a single chunk entry (74.9% token reduction validated). Source observations are archived; a chunk hook replaces them.
 
 ### How the Dream Cycle Works
 
@@ -134,13 +145,13 @@ Nine stages run in sequence each night:
 ```
 Stage 1: Preflight + backup
 Stage 2: Read observations.md, favorites.md, today's daily file
-Stage 3: Classify each observation (critical / high / medium / low / minimal)
-Stage 4: Apply future-date protection (never archive reminders or deadlines)
-Stage 5: Decide archive set based on age + impact thresholds
-Stage 6: Write archive file (memory/archive/observations/YYYY-MM-DD.md)
-Stage 7: Add semantic hooks so archived items stay searchable
-Stage 8: Atomically update observations.md with retained items + hooks
-Stage 9: Validate token count, write dream log + metrics, rollback on failure
+Stage 3: Classify each observation by type and impact
+Stage 4: Chunk clusters of 3+ related observations (WP3)
+Stage 5: Apply future-date protection (never archive reminders or deadlines)
+Stage 6: Decide archive set based on age + type thresholds
+Stage 7: Write archive file (memory/archive/observations/YYYY-MM-DD.md)
+Stage 8: Add multi-hook semantic search hooks (WP0)
+Stage 9: Atomically update observations.md, validate, write dream log + metrics
 ```
 
 Nothing is deleted. Every archived item gets a semantic hook in `observations.md` pointing back to the archive file, so your agent can still find it.
@@ -189,4 +200,4 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-*v1.1.0*
+*v1.3.0*

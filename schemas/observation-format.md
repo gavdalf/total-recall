@@ -44,7 +44,7 @@ The extended observation metadata is embedded as an HTML comment immediately aft
 ### Format
 
 ```
-<!-- dc:type=<type> dc:ttl=<days> dc:date=<YYYY-MM-DD> -->
+<!-- dc:type=<type> dc:ttl=<days> dc:confidence=<0.0-1.0> dc:source=<source-type> dc:date=<YYYY-MM-DD> -->
 ```
 
 ### Fields
@@ -53,6 +53,8 @@ The extended observation metadata is embedded as an HTML comment immediately aft
 |-------|-------------|---------|
 | `dc:type` | One of the 7 type values | `dc:type=preference` |
 | `dc:ttl` | TTL in days; use `never` for rules | `dc:ttl=180` or `dc:ttl=never` |
+| `dc:confidence` | Confidence score 0.0–1.0 (WP0.5) | `dc:confidence=0.85` |
+| `dc:source` | Source type: `explicit`, `implicit`, `inference`, `weak`, `uncertain` | `dc:source=explicit` |
 | `dc:date` | ISO date the observation was first recorded | `dc:date=2026-02-22` |
 
 ### Examples
@@ -60,28 +62,28 @@ The extended observation metadata is embedded as an HTML comment immediately aft
 **A preference observation:**
 ```markdown
 ## Model Selection — Codex 5.3 as Primary Coder
-<!-- dc:type=preference dc:ttl=180 dc:date=2026-02-20 -->
-Gavin confirmed Codex 5.3 as the default model for all coding tasks...
+<!-- dc:type=preference dc:ttl=180 dc:confidence=0.92 dc:source=explicit dc:date=2026-02-20 -->
+User confirmed Codex 5.3 as the default model for all coding tasks...
 ```
 
-**A rule observation:**
+**A rule observation (no TTL expiry):**
 ```markdown
 ## Hard Rule: No Direct Edits to Policy Files
-<!-- dc:type=rule dc:ttl=never dc:date=2026-02-18 -->
-Dream Cycle agent must never edit AGENTS.md, MEMORY.md, TOOLS.md, SOUL.md, or IDENTITY.md...
+<!-- dc:type=rule dc:ttl=never dc:confidence=1.0 dc:source=explicit dc:date=2026-02-18 -->
+Dream Cycle agent must never edit core config files directly...
 ```
 
 **A goal observation:**
 ```markdown
 ## Goal: Phase 2 Dream Cycle Live by Friday
-<!-- dc:type=goal dc:ttl=365 dc:date=2026-02-23 -->
-Target: all four WPs built, dry-run validated, and DREAM_PHASE=2 set in cron by 2026-02-27...
+<!-- dc:type=goal dc:ttl=365 dc:confidence=0.95 dc:source=explicit dc:date=2026-02-23 -->
+Target: all four WPs built, dry-run validated, and DREAM_PHASE=2 set in cron...
 ```
 
 **An event observation (daily summary):**
 ```markdown
 ## Fitbit Summary — 2026-02-22
-<!-- dc:type=event dc:ttl=14 dc:date=2026-02-22 -->
+<!-- dc:type=event dc:ttl=14 dc:confidence=1.0 dc:source=implicit dc:date=2026-02-22 -->
 22,376 steps, 3,450 cal burned, 162 active min...
 ```
 
@@ -111,7 +113,7 @@ ttl_days: 90
 This means:
 - All existing Phase 1 observations are valid without modification
 - The dream cycle will never error on an untagged observation
-- The decay function (WP2) will apply the `fact` decay curve to untagged observations
+- Untagged observations default to `fact` behaviour for archiving decisions
 
 ---
 
