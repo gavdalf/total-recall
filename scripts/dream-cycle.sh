@@ -394,6 +394,7 @@ cmd_decay() {
   set +e
   python3 - "$OBSERVATIONS_FILE" "$today" > "$decay_tmp" <<'PYEOF'
 import sys
+import os
 import re
 from datetime import date
 
@@ -477,8 +478,39 @@ for lineno, line in enumerate(lines, 1):
 
     output.append(line)
 
-print("INFO: Decay complete — {} observations updated".format(changed), file=sys.stderr)
-sys.stdout.write(''.join(output))
+# Archive observations that have decayed below threshold
+ARCHIVE_THRESHOLD = 3.0
+archived = []
+final_output = []
+
+for line in output:
+    stripped = line.rstrip('\n')
+    if '<!--' in stripped and '-->' in stripped and 'dc:' in stripped:
+        imp_m = re.search(r'\bdc:importance=([\d.]+)\b', stripped)
+        if imp_m:
+            imp_val = float(imp_m.group(1))
+            if imp_val < ARCHIVE_THRESHOLD and imp_val >= 0.0:
+                archived.append(line)
+                continue
+    final_output.append(line)
+
+if archived:
+    # Append archived observations to the archive file
+    archive_dir = os.path.dirname(obs_file)
+    archive_file = os.path.join(archive_dir, "archived-observations.md")
+    try:
+        with open(archive_file, 'a', encoding='utf-8') as af:
+            af.write("\n## Auto-archived by decay ({})\n".format(today_str))
+            for a in archived:
+                af.write(a)
+    except IOError as e:
+        print("WARNING: Could not write to archive file: {}".format(e), file=sys.stderr)
+        # Don't lose the data — keep it in output instead
+        final_output.extend(archived)
+        archived = []
+
+print("INFO: Decay complete — {} observations updated, {} archived (below {})".format(changed, len(archived), ARCHIVE_THRESHOLD), file=sys.stderr)
+sys.stdout.write(''.join(final_output))
 PYEOF
   local py_exit=$?
   set -e

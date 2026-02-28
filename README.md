@@ -64,7 +64,7 @@ See [SKILL.md](SKILL.md) for full documentation, configuration, and platform sup
 
 ## Cost
 
-~$0.05–0.15/month using Gemini 2.5 Flash via OpenRouter.
+~$0.03–0.10/month using DeepSeek v3.2 via OpenRouter.
 
 ## LLM Provider Configuration
 
@@ -75,12 +75,20 @@ Total Recall uses OpenAI-compatible chat completion APIs. You can switch provide
 ```bash
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-$OPENROUTER_API_KEY}"   # backward-compatible fallback
-LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
+LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
+OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"              # Observer-specific override
+OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-google/gemini-2.5-flash}"  # fallback if primary fails
 ```
 
 - `LLM_BASE_URL`: Base URL for your provider API (default: OpenRouter)
 - `LLM_API_KEY`: API key for your provider (defaults to `OPENROUTER_API_KEY` for backward compatibility)
-- `LLM_MODEL`: Model ID sent to the provider (default: `google/gemini-2.5-flash`)
+- `LLM_MODEL`: Model ID sent to the provider (default: `deepseek/deepseek-v3.2`)
+- `OBSERVER_MODEL`: Override model for the Observer only (defaults to `LLM_MODEL`)
+- `OBSERVER_FALLBACK_MODEL`: Fallback if primary Observer model fails (default: `google/gemini-2.5-flash`)
+
+### Why DeepSeek v3.2?
+
+We tested Gemini 2.5 Flash, Grok 4.1 Fast, DeepSeek v3.2, and GPT-4o Mini across deduplication, scoring accuracy, and noise rejection. DeepSeek v3.2 won on scoring consistency (cron noise correctly at 1-2, important events at 7+), perfect noise rejection (3/3 NO_OBSERVATIONS on pure heartbeat traffic), and strong dedup. It's also 6x cheaper than Flash on output tokens ($0.40/M vs $2.50/M).
 
 ### Provider examples
 
@@ -126,7 +134,7 @@ Production results (v1.3.0 Phase 2):
 | Night 3 | Live | 11,688 tokens | 2,930 tokens | 75% | 15 items, 0 false archives |
 | Phase 2 live | Chunking + multi-hook | 11,015 tokens | 2,769 tokens | **74.9%** | 6 chunks from 36 observations |
 
-Cost per run: ~$0.003. Models: Claude Sonnet (Dreamer) + Gemini Flash (Observer).
+Cost per run: ~$0.001. Models: Claude Sonnet (Dreamer) + DeepSeek v3.2 (Observer, configurable via `OBSERVER_MODEL`).
 
 ### Phase 2 Features (v1.3.0)
 

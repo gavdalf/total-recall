@@ -2,6 +2,19 @@
 
 All notable changes to Total Recall are documented here.
 
+## [1.4.0] - 2026-02-28
+
+### Fixed — Observation Bloat: Scoring, Dedup & Decay Threshold
+- **Archive threshold raised from 0.5 → 3.0** — observations that decay below 3.0 importance are now auto-archived. Previous threshold was too low, causing decayed items to accumulate indefinitely (a fact scored 4.8 would take 43 days to reach 0.5)
+- **Observer scoring prompt tightened** — added explicit hard rule: automated/cron/scheduled actions ALWAYS score 1-2. Added "score HARD, most observations should land at 1-4" guidance. Prevents scoring inflation where operational noise (preflight checks, token refreshes, auto-updates) was incorrectly scored 4.0-5.0
+- **Dedup fingerprint improved** — increased fingerprint window from 40 → 80 characters and added date/day-name normalisation. Prevents near-duplicate observations from passing the dedup filter when the LLM rephrases slightly ("Daily briefing sent" vs "Saturday briefing sent to Gavin")
+- **Dedup prompt strengthened** — zero-tolerance language with concrete examples of what counts as a duplicate. Addresses LLMs (especially Flash) ignoring soft negative constraints
+
+### Impact
+- In production testing: observations.md reduced from 20.6KB/155 lines → 6.7KB/52 lines (68% reduction)
+- ~4,500 fewer tokens loaded per session startup
+- Decay now meaningfully removes items instead of clamping to 0.0 forever
+
 ## [1.3.0] - 2026-02-26
 
 ### Phase 2 — Multi-Hook Retrieval, Confidence Scoring, Type System, Observation Chunking

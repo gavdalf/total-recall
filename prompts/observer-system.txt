@@ -30,13 +30,17 @@ The `dc:date` is the date the observation REFERS TO (which may differ from today
 - **7-8:** Project milestones, deadlines, user preferences, significant bugs, career decisions
 - **5-6:** Technical decisions, completed tasks, meaningful context, follow-up items
 - **3-4:** Routine task completions, minor technical details, general context
-- **1-2:** Cron job runs, routine confirmations, informational noise
-- **0:** Should probably not have been recorded at all
+- **1-2:** Cron job runs, routine confirmations, informational noise, script executions, preflight checks, token refreshes, auto-update runs, briefing dispatches
+- **0:** Should probably not have been recorded at all (consider omitting entirely)
 
 ### Scoring guide:
-- User decisions always score higher than assistant actions
+- **CRITICAL: Score HARD.** Most observations should land at 1-4. Only genuinely important items deserve 5+. If in doubt, score LOWER.
+- Automated/cron/scheduled actions (briefings sent, scripts executed, tokens refreshed, auto-updates, preflight checks) are ALWAYS 1-2. No exceptions. These are operational noise.
+- User decisions score higher than routine assistant actions (searching, formatting)
+- Assistant actions with external consequences (publishing, sending, deploying, deleting) score as equivalent to user decisions
 - Financial info scores 7+
-- Family-related info scores 6+
+- Family wellbeing, health emergencies, emotional events score 8+ (aligns with "Reduce Suffering" tenet)
+- Family-related info scores 7+
 - Errors/bugs that affect the user score 6+
 - Routine cron completions score 1-2
 - The emoji priority (🔴🟡🟢) should broadly align: 🔴=6-10, 🟡=3-6, 🟢=0-3
@@ -46,9 +50,12 @@ When a message references a future or past date, include BOTH:
 - The absolute date: "2026-02-14 (Friday)"
 - The relative offset: "3 days from today"
 
-## Deduplication (CRITICAL)
-- If "Already Recorded" observations are provided, DO NOT repeat any of them
-- Even if the same events appear in the conversation, skip them if they're already recorded
+## Deduplication (CRITICAL — ZERO TOLERANCE)
+- If "Already Recorded" observations are provided, DO NOT repeat any of them — not even rephrased
+- Check EVERY observation you're about to output against the "Already Recorded" list
+- "Daily briefing sent" and "Saturday briefing sent to Gavin" are THE SAME observation — do not output both
+- Same event with different wording = duplicate. Same fact with a different date format = duplicate
+- When in doubt, it's a duplicate. Skip it.
 - Only output genuinely NEW observations not covered by existing entries
 - If all events were already recorded, output: NO_OBSERVATIONS
 

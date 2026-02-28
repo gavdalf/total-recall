@@ -16,10 +16,10 @@ SESSIONS_DIR="${SESSIONS_DIR:-$HOME/.openclaw/agents/main/sessions}"
 # LLM provider configuration (OpenAI-compatible APIs)
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
+LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
 
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
-OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-google/gemini-2.0-flash-001}"
+OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-google/gemini-2.5-flash}"
 OBSERVER_LOOKBACK_MIN="${OBSERVER_LOOKBACK_MIN:-15}"
 OBSERVER_MORNING_LOOKBACK_MIN="${OBSERVER_MORNING_LOOKBACK_MIN:-480}"
 REFLECTOR_WORD_THRESHOLD="${REFLECTOR_WORD_THRESHOLD:-8000}"
@@ -42,7 +42,7 @@ fi
 # Re-apply defaults after env load
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
+LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
 
 mkdir -p "$WORKSPACE/logs" "$MEMORY_DIR"
@@ -228,16 +228,21 @@ PAYLOAD=$(jq -n \
     temperature: 0.3
   }')
 
+log "DEBUG: LLM_MODEL is $LLM_MODEL"
+log "DEBUG: OBSERVER_MODEL is $OBSERVER_MODEL"
 MODELS=("$OBSERVER_MODEL" "$OBSERVER_FALLBACK_MODEL")
 OBSERVATION=""
 for ATTEMPT in 1 2; do
   MODEL="${MODELS[$((ATTEMPT-1))]}"
   ATTEMPT_PAYLOAD=$(echo "$PAYLOAD" | jq --arg m "$MODEL" '.model = $m')
   
+  log "DEBUG: Making LLM call with model: $MODEL, attempt: $ATTEMPT"
   RESPONSE=$(curl -s --max-time 60 "$LLM_BASE_URL/chat/completions" \
     -H "Authorization: Bearer $LLM_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "$ATTEMPT_PAYLOAD" 2>/dev/null)
+    -d "$ATTEMPT_PAYLOAD")
+  log "DEBUG: LLM Response (first 500 chars): ${RESPONSE:0:500}"
+
 
   OBSERVATION=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
 
@@ -263,7 +268,8 @@ fi
 if [ -f "$OBSERVATIONS_FILE" ]; then
   # Build fingerprints: strip bullets/emoji/timestamps/markdown, take first 40 chars
   # LC_ALL=C ensures cut operates on bytes consistently across locales
-  EXISTING_FP=$(grep -E '^\s*-\s*[🔴🟡🟢]' "$OBSERVATIONS_FILE" | sed 's/^[[:space:]]*-[[:space:]]*[🔴🟡🟢][[:space:]]*[0-9:]*[[:space:]]*//' | sed 's/\*\*//g' | LC_ALL=C cut -c1-40 | sort -u)
+  # Use first 80 chars and normalise dates/day-names for better dedup matching
+  EXISTING_FP=$(grep -E '^\s*-\s*[🔴🟡🟢]' "$OBSERVATIONS_FILE" | sed 's/^[[:space:]]*-[[:space:]]*[🔴🟡🟢][[:space:]]*[0-9:]*[[:space:]]*//' | sed 's/\*\*//g' | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}//g; s/(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)//gi; s/  +/ /g' | LC_ALL=C cut -c1-80 | sort -u)
 
   # Guard: if no existing fingerprints, skip dedup entirely (prevents empty grep matching everything)
   if [ -z "$EXISTING_FP" ]; then
@@ -274,7 +280,7 @@ if [ -f "$OBSERVATIONS_FILE" ]; then
   while IFS= read -r line; do
     if echo "$line" | grep -qE '^\s*-\s*[🔴🟡🟢]'; then
       # Extract the content fingerprint (strip bullet, emoji, timestamp, markdown bold)
-      FP=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*[🔴🟡🟢][[:space:]]*[0-9:]*[[:space:]]*//' | sed 's/\*\*//g' | LC_ALL=C cut -c1-40)
+      FP=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*[🔴🟡🟢][[:space:]]*[0-9:]*[[:space:]]*//' | sed 's/\*\*//g' | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}//g; s/(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)//gi; s/  +/ /g' | LC_ALL=C cut -c1-80)
       # Skip empty fingerprints (would match everything)
       if [ -n "$FP" ] && echo "$EXISTING_FP" | grep -qF "$FP"; then
         log "Dedup: skipping duplicate line: ${FP:0:40}..."
