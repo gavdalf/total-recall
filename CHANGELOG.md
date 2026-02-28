@@ -2,6 +2,32 @@
 
 All notable changes to Total Recall are documented here.
 
+## [1.5.0] - 2026-02-28
+
+### Phase 2 Complete: The Wisdom Builder (WP2 Decay + WP4 Pattern Promotion)
+
+Phase 2 is complete. All 6 work packages are live and validated in production. The 7-day rollout plan was compressed to 5 days using a dry-run-overnight + morning-review + immediate-live pattern.
+
+**Production metrics (full Phase 2 run):** 46 observations analysed, 12 archived, 4,200 to 2,435 tokens (42% reduction), zero false archives across all runs.
+
+#### WP2: Importance Decay (LIVE)
+- Per-type daily decay curves applied to `dc:importance` scores: `event` (-0.5/day), `fact` (-0.1/day), `preference` (-0.02/day), `rule`/`habit`/`goal` (0, never decay)
+- Archive threshold set at 3.0. Items that decay below 3.0 are queued for archival on the next Dream Cycle run
+- `cmd_decay` subcommand added to `dream-cycle.sh`
+- `scripts/backfill-importance.sh` — one-time backfill for observations that predate the importance scoring system
+- First live run: 25 observations decayed, zero items lost
+
+#### WP4: Pattern Promotion Pipeline (LIVE)
+- Scans 7 days of dream logs for recurring themes: 3+ occurrences across 3+ separate calendar days qualifies as a pattern
+- Writes promotion proposals to `memory/dream-staging/` for human review. Never writes directly to `observations.md` or any system file
+- `cmd_write_staging` subcommand with path traversal protection, field validation, and enum checks on `type`, `target_file`, and `confidence`
+- `scripts/staging-review.sh` helper supports `list`, `show`, `approve`, and `reject` operations
+- Confidence capping: model capability patterns are capped at `low` until 14 days of evidence. The `context` type is never promoted
+- Human approval required before any staging proposal becomes a memory
+
+### Coming Next
+- See [Roadmap in SKILL.md](SKILL.md) for post-Phase-2 directions
+
 ## [1.4.0] - 2026-02-28
 
 ### Fixed — Observation Bloat: Scoring, Dedup & Decay Threshold
@@ -52,8 +78,8 @@ Four Phase 2 work packages are now validated, live, and formally released.
   - All validation gates passing
 
 ### Coming Next
-- **WP2: Importance Decay** — per-type daily decay on `dc:importance` scores (in development)
-- **Pattern Promotion** — recurring observations automatically promoted to `habit` or `rule` type
+- **WP2: Importance Decay** — per-type daily decay on `dc:importance` scores. ✅ Shipped in v1.5.0
+- **Pattern Promotion** — recurring observations automatically promoted to `habit` or `rule` type. ✅ Shipped in v1.5.0
 
 ## [1.2.0] - 2026-02-25
 

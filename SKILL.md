@@ -197,7 +197,7 @@ Edit these to match your agent's personality and priorities.
 
 The Dream Cycle is an optional nightly agent that runs after hours to consolidate `observations.md`. It archives stale items and adds semantic hooks so nothing useful is actually lost. Context stays lean; everything remains findable.
 
-**Status: Phase 2 LIVE (WP0/WP0.5/WP1 as of 25 Feb). WP3 building; full Phase 2 target Sun 1 Mar.**
+**Status: Phase 2 COMPLETE as of 28 Feb 2026. All 6 work packages live and validated.**
 
 ### What It Does
 
@@ -264,11 +264,11 @@ research/
 
 ### Phase 2+ Roadmap
 
-*Updated: 2026-02-25 — accelerated schedule, morning-review → immediate-live approach*
+*Updated: 2026-02-28 — Phase 2 complete, all work packages live.*
 
 **Key insight from research:** Agent capability to use retrieval tools matters more than the retrieval mechanism itself. Simple filesystem tools often beat fancy memory frameworks. This validates our markdown-based approach.
 
-**Accelerated rollout approach (as of 25 Feb):** Dry runs fire at 02:30, reviewed in the morning. Approved packages go LIVE the same morning. Next package runs as dry run that same night. Full Phase 2 target: Sun 1 Mar 02:30.
+**Rollout approach:** Dry-run-overnight + morning-review + immediate-live. The 7-day plan was compressed to 5 days. Full Phase 2 completed 28 Feb 2026, one day ahead of the 1 Mar target.
 
 | Phase | Focus | Status |
 |-------|-------|--------|
@@ -277,25 +277,23 @@ research/
 | **Phase 2 — WP0.5** | Confidence metadata (0.0-1.0 score + source attribution) | ✅ LIVE (25 Feb) |
 | **Phase 2 — WP1** | Type system — 7 memory types + TTL classification | ✅ LIVE (25 Feb) |
 | **Phase 2 — WP3** | Chunking — compress related observations into single entries | ✅ LIVE (26 Feb) |
-| **Phase 2 — WP2** | Importance decay — Ebbinghaus curve per memory type | 🔜 In development |
-| **Phase 2 — WP4** | Pattern promotion pipeline — staging proposals for human review | 🔜 DRY RUN Sat 28 Feb 02:30 |
-| **Full Phase 2** | All work packages live | 🎯 Target: Sun 1 Mar 02:30 |
+| **Phase 2 — WP2** | Importance decay — per-type daily decay curves | ✅ LIVE (28 Feb 2026) |
+| **Phase 2 — WP4** | Pattern promotion pipeline — staging proposals for human review | ✅ LIVE (28 Feb 2026) |
+| **Full Phase 2** | All work packages live | ✅ COMPLETE (28 Feb 2026) |
 | **Phase 3** | Contradiction detection, retrieval validation loop | Future |
 
-**Current rollout schedule:**
+**Completed rollout schedule:**
 
 | Night/Morning | What | Status |
 |---------------|------|--------|
 | Tue 24 night (02:30) | WP0 + WP0.5 + WP1 dry run | ✅ DONE |
-| Wed 25 morning (07:01) | Approved → WP0/WP0.5/WP1 LIVE (66.1% reduction) | ✅ DONE |
-| Wed 25 day (07:30-10:00) | Build WP3 chunking (Codex) | 🔨 IN PROGRESS |
-| Thu 26 night (02:30) | WP3 chunking dry run | 🔜 Tonight |
-| Thu 26 morning | Review → WP3 LIVE if OK, build WP2 | 🔜 Pending |
-| Fri 27 night (02:30) | WP3 LIVE + WP2 importance decay dry run | 🔜 Pending |
-| Fri 27 morning | Review → WP2 LIVE if OK, build WP4 | 🔜 Pending |
-| Sat 28 night (02:30) | WP2 LIVE + WP4 pattern promotion dry run | 🔜 Pending |
-| Sat 28 morning | Review → WP4 flip LIVE | 🔜 Pending |
-| Sun 1 Mar (02:30) | 🎉 Full Phase 2 LIVE | 🎯 Target |
+| Wed 25 morning (07:01) | Approved — WP0/WP0.5/WP1 LIVE (66.1% reduction) | ✅ DONE |
+| Thu 26 night (02:30) | WP3 chunking dry run | ✅ DONE |
+| Thu 26 morning | Review — WP3 LIVE (74.9% reduction, 6 chunks from 36 obs) | ✅ DONE |
+| Fri 27 night (02:30) | WP2 importance decay dry run | ✅ DONE |
+| Fri 27 morning | Review — WP2 LIVE (25 obs decayed, 0 lost) | ✅ DONE |
+| Sat 28 night (02:30) | WP4 pattern promotion dry run | ✅ DONE |
+| Sat 28 morning | Review — WP4 LIVE, Phase 2 complete | ✅ DONE |
 
 **Phase 2 work packages:**
 - **WP0 Multi-hook** — 4-5 alternative search phrasings per archived item (30-50% recall improvement)

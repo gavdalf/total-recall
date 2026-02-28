@@ -13,7 +13,7 @@ Default assumption if not specified externally: `READ_ONLY_MODE=false`.
 ## Phase Flag
 - `DREAM_PHASE` controls which feature set runs:
   - If `DREAM_PHASE` is **not set** or is `1` → run Phase 1 behaviour only. Skip all type classification, TTL lookup, and type distribution reporting. Everything works exactly as before.
-  - If `DREAM_PHASE >= 2` → run Phase 2 behaviour. Execute the full type classification pass in Stage 3 and include the Type Distribution table in the dream log.
+  - If `DREAM_PHASE >= 2` → run Phase 2 behaviour. Execute the full type classification pass in Stage 3, pattern scan in Stage 3d, chunking in Stage 4b, and include the Type Distribution table in the dream log.
 
 **Instant rollback:** Set `DREAM_PHASE=1` in the cron payload to revert to Phase 1 at any time.
 
@@ -144,6 +144,81 @@ Apply this aggressively for repetitive operational noise:
 - Keep only the most informative instance when duplicates exist; archive the rest.
 - Never collapse away unique failures, exceptions, approval decisions, or first-time configuration changes.
 - If uncertain, keep one canonical summary + archive obvious duplicates.
+
+### 3d) Pattern Scan (multi-day) — DREAM_PHASE >= 2 only
+> **Skip this entire section if `DREAM_PHASE < 2` or `DREAM_PHASE` is not set.**
+
+When `DREAM_PHASE >= 2`, scan for recurring themes across the last 7 days of dream logs (loaded from `memory/dream-logs/`) and the current `observations.md`. A theme qualifies as a **pattern** only if it appears in observations from **3 or more separate calendar days**.
+
+**Minimum threshold (non-negotiable):**
+- At least 3 occurrences of the same theme
+- Across at least 3 **separate calendar days** (same-day duplicates count as ONE occurrence)
+- Patterns based on fewer than 3 separate days → **no proposal generated**
+
+**What qualifies as a pattern:**
+- Recurring user preference stated or implied across multiple sessions (e.g. "always use Mac Studio for browser tasks")
+- Systematic operational behaviour the agent consistently applies (e.g. "use Chrome relay only when Gavin asks")
+- Repeated failure or workaround applied more than twice (e.g. "Gemini tool-call loops — keep tasks bounded")
+- Consistent rule or constraint applied across multiple contexts
+
+**What does NOT qualify:**
+- One-off events or individual incidents
+- Things already documented in AGENTS.md, MEMORY.md, TOOLS.md, SOUL.md, IDENTITY.md, or favorites.md
+- Patterns where source observations have `dc:importance < 5.0` (noise — not reliable enough)
+- Patterns based on fewer than 3 separate days' evidence
+
+**Confidence assignment:**
+| Evidence | Confidence |
+|----------|-----------|
+| 3 occurrences across 3 days, all within last 7 days | `low` — insufficient history; requires human review note |
+| 4-6 occurrences across 3-6 days, within 14 days | `medium` |
+| 7+ occurrences across 7+ days, consistent pattern | `high` |
+| Any pattern about model capabilities/limitations | Cap at `low` until 14 days of evidence |
+
+**Low-confidence note (mandatory):** Any proposal with `confidence: low` MUST include in its evidence section:
+> ⚠️ Low confidence — based on < 7 days of evidence. Human review strongly recommended before applying.
+
+**Target file mapping (from WP1 type tags):**
+
+| Pattern type | Target file |
+|-------------|------------|
+| `rule` | AGENTS.md |
+| `habit` | MEMORY.md |
+| `preference` | MEMORY.md or favorites.md (if personal preference) |
+| `fact` | TOOLS.md (if tool/system fact) or AGENTS.md |
+| `goal` | AGENTS.md |
+| `context` | (skip — too transient to promote) |
+
+**Never promote `context` type observations to staging.**
+
+**Execution — for each qualifying pattern:**
+1. Identify the pattern (theme, days it appears, source observation IDs)
+2. Determine target file using the mapping above
+3. Draft the exact proposed text (ready to paste, complete markdown fragment)
+4. Build the proposal JSON payload:
+   ```json
+   {
+     "type": "rule|preference|habit|fact|goal",
+     "target_file": "AGENTS.md|MEMORY.md|TOOLS.md|favorites.md",
+     "confidence": "high|medium|low",
+     "pattern_summary": "One-sentence description of the pattern",
+     "proposed_text": "Exact markdown text to add to target file",
+     "evidence": "Quoted snippets from supporting observations with IDs and dates",
+     "supporting_observations": ["OBS-ID-1", "OBS-ID-2", "OBS-ID-3"]
+   }
+   ```
+5. Write the proposal via: `dream-cycle.sh write-staging memory/dream-staging/YYYYMMDD-HHMMSS-[type].md '<json>'`
+6. **NEVER write directly to AGENTS.md, MEMORY.md, TOOLS.md, SOUL.md, IDENTITY.md, or favorites.md**
+
+**Hard safety rule:** Only `memory/dream-staging/` is a valid write target. If your logic would write anywhere else, stop and flag it as a review item instead.
+
+**Context budget safety:** If loading 7 days of dream logs would exceed available context (estimated > 80k tokens), load the most recent days first and stop when budget is near. Pattern scan is skipped with a note in the dream log — this is not a failure.
+
+**Report:** Include in the dream log:
+- Number of patterns scanned
+- Number of proposals written to staging
+- List of pattern summaries with confidence level
+- Any patterns that were detected but did not meet the threshold (with reason)
 
 ### 4) Future-Date Protection (Hard Rule)
 If an item includes a **future date** (reminder, deadline, scheduled event), it is **never archived**, regardless of impact/age.
@@ -351,8 +426,9 @@ Write metrics JSON exactly with fields:
 ---
 
 ## Constraints
-- No edits to AGENTS/MEMORY/TOOLS/SOUL policy files.
-- No pattern promotion in Phase 1.
+- No edits to AGENTS/MEMORY/TOOLS/SOUL/IDENTITY policy files or favorites.md — ever, at any phase.
+- Pattern promotions go to `memory/dream-staging/` only via `dream-cycle.sh write-staging`. Never direct writes.
+- No pattern promotion in Phase 1 (DREAM_PHASE < 2).
 - Use atomic write flow via script subcommands.
 - If uncertain about a borderline item, keep it active and note in `Flagged for Review`.
 

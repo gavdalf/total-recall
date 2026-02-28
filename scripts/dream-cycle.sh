@@ -46,9 +46,12 @@ require_file() {
   [ -f "$path" ] || { err "Required file missing: $path"; exit 1; }
 }
 
+STAGING_DIR="$MEMORY_DIR/dream-staging"
+
 ensure_dirs() {
   mkdir -p "$ARCHIVE_DIR" "$DREAM_LOG_DIR" "$BACKUP_DIR" "$METRICS_DIR"
   mkdir -p "$MEMORY_DIR/archive/chunks"
+  mkdir -p "$STAGING_DIR"
 }
 
 atomic_write() {
@@ -533,6 +536,143 @@ PYEOF
   info "{\"status\":\"ok\",\"command\":\"decay\",\"date\":\"$today\"}"
 }
 
+cmd_write_staging() {
+  local staging_file="${1:-}"
+  local json_arg="${2:-}"
+
+  [ -n "$staging_file" ] || { err "Usage: dream-cycle.sh write-staging <staging-file> <json-data?>"; exit 1; }
+  ensure_dirs
+
+  # ── Safety check: path must be workspace-relative and inside memory/dream-staging/ ──
+  # Strip any leading "./" normalisation, then check prefix
+  local normalised_path
+  normalised_path="$(printf '%s' "$staging_file" | sed 's|^\./||')"
+
+  # Resolve to absolute and verify it stays within STAGING_DIR (prevents path traversal)
+  local abs_staging_file
+  abs_staging_file="$(cd "$OPENCLAW_WORKSPACE" && realpath -m "$normalised_path" 2>/dev/null || true)"
+
+  if [ -z "$abs_staging_file" ]; then
+    err "Cannot resolve staging file path: $staging_file"
+    exit 1
+  fi
+
+  # Ensure the resolved path is under STAGING_DIR (no path traversal)
+  local real_staging_dir
+  real_staging_dir="$(realpath -m "$STAGING_DIR" 2>/dev/null || echo "$STAGING_DIR")"
+
+  case "$abs_staging_file" in
+    "$real_staging_dir"/*)
+      : # ok — inside staging dir
+      ;;
+    *)
+      err "Staging file path must be inside memory/dream-staging/ — got: $staging_file (resolved: $abs_staging_file)"
+      exit 1
+      ;;
+  esac
+
+  local payload
+  payload="$(json_input_or_arg "$json_arg")"
+
+  # Reject empty payload
+  if [ -z "$(printf '%s' "$payload" | tr -d '[:space:]')" ]; then
+    err "Staging payload is empty"
+    exit 1
+  fi
+
+  # Validate JSON
+  printf '%s\n' "$payload" | jq -e . >/dev/null 2>&1 || {
+    err "Staging payload is not valid JSON"
+    exit 1
+  }
+
+  # Validate required fields
+  local required_fields="type target_file confidence pattern_summary proposed_text evidence"
+  local missing_fields=""
+  local field
+  for field in $required_fields; do
+    # Field must exist, be non-null, and be a non-empty string
+    if ! printf '%s\n' "$payload" | jq -e --arg f "$field" \
+        'has($f) and .[$f] != null and (.[$f] | type == "string") and (.[$f] | length > 0)' \
+        >/dev/null 2>&1; then
+      missing_fields="${missing_fields} ${field}"
+    fi
+  done
+
+  if [ -n "$missing_fields" ]; then
+    err "Staging payload missing or empty required string fields:${missing_fields}"
+    exit 1
+  fi
+
+  # Validate type is one of the allowed WP1 types (not 'context' — context type is never promoted)
+  printf '%s\n' "$payload" | jq -e '.type | IN("fact", "preference", "goal", "habit", "rule")' \
+    >/dev/null 2>&1 || {
+    err "Staging payload field 'type' must be one of: fact, preference, goal, habit, rule (context is never promoted)"
+    exit 1
+  }
+
+  # Validate target_file is one of the allowed files
+  printf '%s\n' "$payload" | jq -e '.target_file | IN("AGENTS.md", "MEMORY.md", "TOOLS.md", "favorites.md")' \
+    >/dev/null 2>&1 || {
+    err "Staging payload field 'target_file' must be one of: AGENTS.md, MEMORY.md, TOOLS.md, favorites.md"
+    exit 1
+  }
+
+  # Validate confidence level
+  printf '%s\n' "$payload" | jq -e '.confidence | IN("high", "medium", "low")' \
+    >/dev/null 2>&1 || {
+    err "Staging payload field 'confidence' must be one of: high, medium, low"
+    exit 1
+  }
+
+  # supporting_observations is optional but if present must be an array of strings
+  if printf '%s\n' "$payload" | jq -e 'has("supporting_observations") and (.supporting_observations != null)' \
+      >/dev/null 2>&1; then
+    printf '%s\n' "$payload" | jq -e '.supporting_observations | type == "array"' >/dev/null 2>&1 || {
+      err "Staging payload field 'supporting_observations' must be an array when present"
+      exit 1
+    }
+  fi
+
+  # Generate staging file path (workspace-absolute)
+  local staging_path="$abs_staging_file"
+  mkdir -p "$(dirname "$staging_path")"
+
+  # Build the proposal markdown and write atomically
+  # Staging files are NOT git-committed (ephemeral, pending human review)
+  local generated_at
+  generated_at="$(ISO_STAMP_UTC)"
+
+  {
+    printf '%s\n' "$payload" | jq -r --arg ts "$generated_at" '
+      "# Pattern Promotion Proposal",
+      "**Generated**: " + $ts,
+      "**Type**: " + .type,
+      "**Target file**: " + .target_file,
+      "**Confidence**: " + .confidence,
+      "**Supporting observations**: " + (
+        if has("supporting_observations") and (.supporting_observations | type == "array") and (.supporting_observations | length > 0)
+        then (.supporting_observations | join(", "))
+        else "N/A"
+        end
+      ),
+      "**Pattern summary**: " + .pattern_summary,
+      "",
+      "## Proposed addition to " + .target_file,
+      "```",
+      .proposed_text,
+      "```",
+      "",
+      "## Evidence",
+      .evidence,
+      "",
+      "## Human review required — respond: APPROVE / REJECT / MODIFY"
+    '
+  } | atomic_write "$staging_path"
+
+  info "{\"status\":\"ok\",\"command\":\"write-staging\",\"file\":\"$staging_file\",\"confidence\":$(printf '%s\n' "$payload" | jq '.confidence')}"
+}
+
 cmd_validate() {
   require_file "$OBSERVATIONS_FILE"
   ensure_dirs
@@ -618,6 +758,7 @@ Usage:
   dream-cycle.sh update-observations <new-observations-file>
   dream-cycle.sh write-log <log-file> <json-data?>
   dream-cycle.sh write-metrics <json-file> <json-data?>
+  dream-cycle.sh write-staging <staging-file> <json-data?>
   dream-cycle.sh validate
   dream-cycle.sh rollback
 
@@ -629,6 +770,11 @@ Notes:
     Types without metadata are left unchanged. Decay rates:
       event -0.5/day | fact -0.1/day | preference -0.02/day
       rule, habit, goal: 0 (no decay) | unknown types: -0.1/day (fact rate)
+  - write-staging: writes a Pattern Promotion Proposal to memory/dream-staging/ only.
+    Required JSON fields: type, target_file, confidence, pattern_summary, proposed_text, evidence.
+    Optional: supporting_observations (array of OBS IDs).
+    Path traversal is blocked — file must resolve inside memory/dream-staging/.
+    Staging files are NOT git-committed (ephemeral, pending human review via staging-review.sh).
   - DREAM_TOKEN_TARGET env var overrides the default token target (default: 5000).
 EOF
 }
@@ -663,6 +809,10 @@ main() {
     write-metrics)
       shift
       cmd_write_metrics "$@"
+      ;;
+    write-staging)
+      shift
+      cmd_write_staging "$@"
       ;;
     validate)
       shift
