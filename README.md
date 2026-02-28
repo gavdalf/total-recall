@@ -50,7 +50,7 @@ See [SKILL.md](SKILL.md) for full documentation, configuration, and platform sup
 | `scripts/observer-watcher.sh` | Reactive inotify trigger (Linux) |
 | `scripts/dream-cycle.sh` | Nightly memory consolidation helper (Dream Cycle) |
 | `scripts/staging-review.sh` | Review, approve, or reject pattern promotion proposals |
-| `scripts/backfill-importance.sh` | One-time backfill for pre-WP2 observations lacking importance scores |
+| `scripts/backfill-importance.sh` | One-time backfill for pre-WP2 observations lacking importance scores (requires `ANTHROPIC_API_KEY`) |
 | `scripts/setup.sh` | One-command setup (dirs, watcher service) |
 | `scripts/_compat.sh` | Cross-platform helpers (Linux + macOS) |
 | `prompts/` | LLM system prompts for observer + reflector |

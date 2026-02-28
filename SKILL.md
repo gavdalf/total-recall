@@ -308,7 +308,7 @@ research/
 
 See `research/dream-cycle-strategy.md` and `research/dream-cycle-phase2-scope.md` for full design docs.
 
-Set `DREAM_PHASE=2` in your cron payload to enable Phase 2 behaviour.
+Phase 2 is now the default behaviour. The `DREAM_PHASE` variable is retained for compatibility but no longer needs to be set explicitly.
 
 ---
 

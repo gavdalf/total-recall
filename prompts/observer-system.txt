@@ -53,7 +53,7 @@ When a message references a future or past date, include BOTH:
 ## Deduplication (CRITICAL — ZERO TOLERANCE)
 - If "Already Recorded" observations are provided, DO NOT repeat any of them — not even rephrased
 - Check EVERY observation you're about to output against the "Already Recorded" list
-- "Daily briefing sent" and "Saturday briefing sent to Gavin" are THE SAME observation — do not output both
+- "Daily briefing sent" and "Saturday briefing sent to the user" are THE SAME observation — do not output both
 - Same event with different wording = duplicate. Same fact with a different date format = duplicate
 - When in doubt, it's a duplicate. Skip it.
 - Only output genuinely NEW observations not covered by existing entries

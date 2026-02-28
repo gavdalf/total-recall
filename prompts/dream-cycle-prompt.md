@@ -157,7 +157,7 @@ When `DREAM_PHASE >= 2`, scan for recurring themes across the last 7 days of dre
 
 **What qualifies as a pattern:**
 - Recurring user preference stated or implied across multiple sessions (e.g. "always use Mac Studio for browser tasks")
-- Systematic operational behaviour the agent consistently applies (e.g. "use Chrome relay only when Gavin asks")
+- Systematic operational behaviour the agent consistently applies (e.g. "use Chrome relay only when the user asks")
 - Repeated failure or workaround applied more than twice (e.g. "Gemini tool-call loops — keep tasks bounded")
 - Consistent rule or constraint applied across multiple contexts
 
