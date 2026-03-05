@@ -2,6 +2,12 @@
 
 All notable changes to Total Recall are documented here.
 
+## [2.0.1] - 2026-03-05
+
+### Fixed
+- Lock files moved from `/tmp` to `$WORKSPACE/logs/` to prevent cross-workspace collisions when running multiple agents (thanks @zweice, PR #4)
+- Dream cycle auto-creates `favorites.md` with a skeleton if missing instead of failing on first run (thanks @zweice, PR #4)
+
 ## [2.0.0] - 2026-03-05
 
 ### Added
