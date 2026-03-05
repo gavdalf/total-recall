@@ -1,0 +1,135 @@
+workspace: .
+
+paths:
+  workspace: .
+  memory_dir: ./memory
+  events_bus: ./memory/events/bus.jsonl
+  sensor_state_dir: ./memory/sensor-state
+  rumination_dir: ./memory/rumination
+  followups_file: ./memory/rumination/follow-ups.jsonl
+  observations_file: ./memory/observations.md
+  preconscious_buffer: ./memory/preconscious-buffer.md
+  logs_dir: ./logs
+  health_data_dir: ./health/data
+  env_file: ./.env
+  perplexity_search_script: ""
+  openclaw_config: ~/.openclaw/openclaw.json
+
+profile:
+  assistant_name: Max
+  primary_user_name: the user
+  household_context: their household
+  family_labels: []
+  timezone: UTC
+  location_label: ""
+
+api:
+  http_referer: https://github.com/gavdalf/total-recall
+
+models:
+  rumination: google/gemini-2.5-flash
+  classification: google/gemini-2.5-flash
+  enrichment: google/gemini-2.5-flash
+  ambient_actions: google/gemini-2.5-flash
+
+connectors:
+  # Sender substrings that raise email importance to 0.8.
+  # Add your own patterns here (employer, accountant, doctor, school, etc.)
+  # Examples: "mycompany", "school", "hospital", "tax-authority", "bank"
+  high_importance_senders: []
+  calendar:
+    enabled: false
+    provider: gog
+    account: ""
+    calendar_id: primary
+    lookahead_days: 2
+    max_events: 50
+    keyring_password: ""
+  todoist:
+    enabled: false
+  ionos:
+    enabled: false
+    account: ionos
+    unread_limit: 10
+  gmail:
+    enabled: false
+    provider: gog
+    account: ""
+    unread_query: is:unread
+    max_messages: 10
+    keyring_password: ""
+  fitbit:
+    enabled: false
+    sleep_target_hours: 7.5
+    short_sleep_minutes: 360
+    great_sleep_minutes: 480
+    watch_off_minutes: 180
+    watch_uncertain_minutes: 300
+    resting_hr_threshold: 65
+    weight_target_lbs: 157
+    steps_milestone: 10000
+  filewatch:
+    enabled: true
+    watch_files:
+      - "{memory_dir}/observations.md"
+      - "{memory_dir}/{today}.md"
+      - "{memory_dir}/favorites.md"
+
+notifications:
+  quiet_hours:
+    enabled: true
+    timezone: UTC
+    start_hour: 22
+    end_hour: 7
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  discord:
+    enabled: false
+    webhook_url: ""
+  webhook:
+    enabled: false
+    url: ""
+    headers: {}
+
+thresholds:
+  rumination_cooldown_seconds: 1800
+  rumination_staleness_seconds: 14400
+  sensor_prune_hours: 48
+  emergency:
+    importance: 0.85
+    expires_within_seconds: 14400
+    max_alerts_per_day: 2
+
+ambient_actions:
+  enabled: true
+  max_actions: 5
+  action_budget_seconds: 60
+  weather_url: https://wttr.in
+  places:
+    enabled: false
+    default_lat: 0.0
+    default_lng: 0.0
+    default_limit: 3
+  tool_settings:
+    calendar_lookup:
+      gog_account: ""
+      gog_keyring_password: ""
+    gmail_search:
+      gog_account: ""
+      gog_keyring_password: ""
+    gmail_read:
+      gog_account: ""
+      gog_keyring_password: ""
+    ionos_search:
+      account: ionos
+    fitbit_data:
+      enabled: true
+    openrouter_balance:
+      enabled: true
+    web_search:
+      enabled: false
+      script: ""
+    places_lookup:
+      enabled: false

@@ -2,6 +2,25 @@
 
 All notable changes to Total Recall are documented here.
 
+## [2.0.0] - 2026-03-05
+
+### Added
+- Ambient Intelligence Engine configuration in `config/aie.yaml`
+- Shared AIE config loader in `scripts/aie-config.sh`
+- Pluggable connector toggles for calendar, todoist, ionos, gmail, fitbit, and filewatch
+- Notification channel configuration for Telegram, Discord, and generic webhooks
+- Configurable model selection for rumination, classification, enrichment, and ambient actions
+
+### Changed
+- Sanitised the new AIE scripts to remove user-specific chat IDs, account names, workspace paths, and model IDs
+- Replaced hardcoded `~/clawd` path assumptions with configurable workspace and path settings
+- Updated `sensor-sweep`, `rumination-engine`, `preconscious-select`, `ambient-actions`, `buffer-inject`, and `emergency-surface` to read shared config defaults
+- Updated all AIE connectors to self-check `enabled` state before running
+- Rewrote the README with AIE architecture, quick start, and config reference sections
+
+### Notes
+- v1.x functionality remains intact and continues to ship alongside the new AIE pipeline
+
 ## [1.5.1] - 2026-02-28
 
 ### Changed

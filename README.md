@@ -1,36 +1,44 @@
-# 🧠 Total Recall — Autonomous Agent Memory
+# Total Recall
 
-**The only memory system that watches on its own.**
+Autonomous memory for OpenClaw-style agents.
 
-No database. No vectors. No manual saves. Just an LLM observer that compresses your conversations into prioritised notes, consolidates when they grow, and recovers anything missed. Five layers of redundancy, zero maintenance. ~$0.10/month.
+Total Recall v2.0 keeps the existing v1.x stack intact:
 
-While other memory skills ask you to remember to remember, this one just pays attention.
+- Observer
+- Reflector
+- Session Recovery
+- Reactive Watcher
+- Dream Cycle
 
-## How It Works
+It also adds the Ambient Intelligence Engine (AIE): a configurable sensor and rumination pipeline that can watch external systems, think about what changed, maintain a preconscious buffer, and surface urgent items.
 
-```
-Layer 1: Observer (cron, every 15 min)
-    ↓ compresses recent messages → observations.md
-Layer 2: Reflector (auto-triggered when observations > 8000 words)
-    ↓ consolidates, removes superseded info → 40-60% reduction
-Layer 3: Session Recovery (runs on every /new or /reset)
-    ↓ catches any session the Observer missed
-Layer 4: Reactive Watcher (inotify daemon, Linux only)
-    ↓ triggers Observer after 40+ new JSONL writes, 5-min cooldown
-Layer 5: Pre-compaction hook (memoryFlush)
-    ↓ emergency capture before OpenClaw compacts context
-```
+Prerequisites: `python3`, `jq`, `curl`, and `pip install pyyaml`.
 
-Inspired by how human memory works during sleep — the hippocampus captures experiences, and during consolidation, important memories are strengthened while noise is discarded.
+## Architecture
 
-## Install via ClawdHub
+### v1.x memory loop
 
-```bash
-clawdhub install total-recall
-bash skills/total-recall/scripts/setup.sh
+```text
+Observer -> observations.md -> Reflector -> Dream Cycle -> session recovery / watcher
 ```
 
-## Install from GitHub
+### v2.0 Ambient Intelligence Engine
+
+```text
+sensor-sweep
+  -> enabled connectors emit events to memory/events/bus.jsonl
+  -> rumination-engine reads new events and writes structured insights
+  -> preconscious-select scores recent insights into memory/preconscious-buffer.md
+  -> ambient-actions optionally enriches insights with read-only lookups
+  -> emergency-surface pushes urgent alerts through configured channels
+  -> buffer-inject sends the latest buffer back into the live session
+```
+
+The AIE flow is additive. None of the v1.x scripts are removed or replaced.
+
+## Quick Start
+
+### v1.x setup
 
 ```bash
 git clone https://github.com/gavdalf/total-recall.git
@@ -38,183 +46,227 @@ cd total-recall
 bash scripts/setup.sh
 ```
 
-See [SKILL.md](SKILL.md) for full documentation, configuration, and platform support.
+### AIE setup
 
-## What's Inside
-
-| Component | Description |
-|-----------|-------------|
-| `scripts/observer-agent.sh` | Compresses recent conversations via LLM |
-| `scripts/reflector-agent.sh` | Consolidates when observations grow large |
-| `scripts/session-recovery.sh` | Catches missed sessions on /new |
-| `scripts/observer-watcher.sh` | Reactive inotify trigger (Linux) |
-| `scripts/dream-cycle.sh` | Nightly memory consolidation (Dream Cycle) |
-| `scripts/staging-review.sh` | Review, approve, or reject Pattern Promotion proposals |
-| `scripts/backfill-importance.sh` | One-time backfill for older observations lacking importance scores (requires `ANTHROPIC_API_KEY`) |
-| `scripts/setup.sh` | One-command setup (dirs, watcher service) |
-| `scripts/_compat.sh` | Cross-platform helpers (Linux + macOS) |
-| `prompts/` | LLM system prompts for observer + reflector |
-| `prompts/dream-cycle-prompt.md` | Agent prompt for the nightly Dream Cycle run |
-| `dream-cycle/` | Dream Cycle documentation |
-
-## Platform Support
-
-| Platform | Observer + Reflector + Recovery | Reactive Watcher |
-|----------|-------------------------------|-----------------|
-| Linux | Full support | With inotify-tools |
-| macOS | Full support | Not available (cron-only mode) |
-
-## Cost
-
-~$0.03-0.10/month using DeepSeek v3.2 via OpenRouter.
-
-## LLM Provider Configuration
-
-Total Recall uses OpenAI-compatible chat completion APIs. You can switch providers without editing scripts.
-
-### Environment variables
+1. Review [`config/aie.yaml`](config/aie.yaml).
+2. Set `workspace` if you do not want to use the repo root.
+3. Enable only the connectors and notification channels you actually use.
+4. Add credentials to `./.env` or your shell environment.
+5. Run a dry pass:
 
 ```bash
-LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
-LLM_API_KEY="${LLM_API_KEY:-$OPENROUTER_API_KEY}"   # backward-compatible fallback
-LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
-OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"              # Observer-specific override
-OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-google/gemini-2.5-flash}"  # fallback if primary fails
+bash scripts/sensor-sweep.sh --dry-run
+bash scripts/rumination-engine.sh --dry-run
+bash scripts/preconscious-select.sh --dry-run
+bash scripts/ambient-actions.sh --dry-run-actions
 ```
 
-- `LLM_BASE_URL`: Base URL for your provider API (default: OpenRouter)
-- `LLM_API_KEY`: API key for your provider (defaults to `OPENROUTER_API_KEY` for backward compatibility)
-- `LLM_MODEL`: Model ID sent to the provider (default: `deepseek/deepseek-v3.2`)
-- `OBSERVER_MODEL`: Override model for the Observer only (defaults to `LLM_MODEL`)
-- `OBSERVER_FALLBACK_MODEL`: Fallback if primary Observer model fails (default: `google/gemini-2.5-flash`)
-
-### Why DeepSeek v3.2?
-
-We tested Gemini 2.5 Flash, Grok 4.1 Fast, DeepSeek v3.2, and GPT-4o Mini across deduplication, scoring accuracy, and noise rejection. DeepSeek v3.2 won on scoring consistency (cron noise correctly at 1-2, important events at 7+), perfect noise rejection (3/3 NO_OBSERVATIONS on pure heartbeat traffic), and strong dedup. It's also 6x cheaper than Flash on output tokens ($0.40/M vs $2.50/M).
-
-### Provider examples
+6. Schedule the AIE loop once the dry run looks correct:
 
 ```bash
-# OpenRouter (default behavior)
-export OPENROUTER_API_KEY="your-openrouter-key"
-
-# Ollama (local)
-export LLM_BASE_URL="http://localhost:11434/v1"
-export LLM_API_KEY="ollama"            # any non-empty value
-export LLM_MODEL="llama3.1:8b"
-
-# LM Studio (local server)
-export LLM_BASE_URL="http://localhost:1234/v1"
-export LLM_API_KEY="lm-studio"         # any non-empty value
-export LLM_MODEL="local-model"
-
-# Together.ai
-export LLM_BASE_URL="https://api.together.xyz/v1"
-export LLM_API_KEY="your-together-key"
-export LLM_MODEL="meta-llama/Llama-3.3-70B-Instruct-Turbo"
-
-# Groq
-export LLM_BASE_URL="https://api.groq.com/openai/v1"
-export LLM_API_KEY="your-groq-key"
-export LLM_MODEL="llama-3.3-70b-versatile"
+*/15 * * * * OPENCLAW_WORKSPACE=/path/to/total-recall bash /path/to/total-recall/scripts/sensor-sweep.sh >> /path/to/total-recall/logs/sensor-sweep.log 2>&1
+17,47 * * * * OPENCLAW_WORKSPACE=/path/to/total-recall bash /path/to/total-recall/scripts/preconscious-select.sh >> /path/to/total-recall/logs/rumination.log 2>&1
+19,49 * * * * OPENCLAW_WORKSPACE=/path/to/total-recall bash /path/to/total-recall/scripts/emergency-surface.sh >> /path/to/total-recall/logs/emergency-surface.log 2>&1
 ```
 
-`OPENROUTER_API_KEY` remains supported for existing setups.
+Minimal first-run path:
 
----
+- leave every connector disabled except `filewatch`
+- keep notifications disabled
+- set only the model IDs you want under `models`
+- add the API key required by your chosen model provider
 
-## Total Recall: Dream Cycle
+## AIE Configuration
 
-The overnight memory consolidation system. While you sleep, an agent reviews `observations.md`, archives stale items, and adds semantic hooks so nothing useful is actually lost. It keeps your context lean without throwing anything away.
+All new AIE behavior is controlled by [`config/aie.yaml`](config/aie.yaml).
 
-### Typical results
+### Top-level sections
 
-| Run | Mode | Before | After | Reduction |
-|-----|------|--------|-------|-----------|
-| Light session | Dry run | 9,445 tokens | 8,309 tokens | 12% |
-| Heavy session | Dry run | 16,900 tokens | 6,800 tokens | 60% |
-| Live run | Live | 11,688 tokens | 2,930 tokens | 75% |
-| With chunking | Live | 11,015 tokens | 2,769 tokens | 75% |
-| Full feature set | Live | 4,200 tokens | 2,435 tokens | 42% |
+- `workspace`: root directory for memory, logs, health data, and `.env`
+- `paths`: all file and directory locations used by AIE scripts
+- `profile`: assistant/user labels and timezone used in prompts and quiet hours
+- `api`: shared API metadata such as the outbound HTTP referer
+- `models`: model IDs for rumination, classification, enrichment, and ambient actions
+- `connectors`: per-connector enable flags, high-importance sender patterns, and connector-specific settings
+- `notifications`: quiet hours plus Telegram, Discord, and generic webhook delivery
+- `thresholds`: cooldowns, pruning windows, emergency thresholds
+- `ambient_actions`: global action toggle plus read-only tool settings
 
-Cost per run: ~$0.001. Models: Claude Sonnet (Dreamer) + DeepSeek v3.2 (Observer, configurable via `OBSERVER_MODEL`).
+### Connector toggles
 
-### Dream Cycle Features
+Each connector now checks its own `enabled` flag before doing any work:
 
-**Multi-Hook Retrieval** — generates 4-5 alternative semantic hooks per archived item. Addresses vocabulary mismatch so searches using different words still find the memory.
+- `connectors.calendar.enabled`
+- `connectors.todoist.enabled`
+- `connectors.ionos.enabled`
+- `connectors.gmail.enabled`
+- `connectors.fitbit.enabled`
+- `connectors.filewatch.enabled`
 
-**Confidence Scoring** — every observation gets a confidence score (0.0-1.0) and source type (`explicit`, `implicit`, `inference`, `weak`, `uncertain`). High-confidence items are preserved longer.
+The orchestrator in [`scripts/sensor-sweep.sh`](scripts/sensor-sweep.sh) also skips disabled connectors.
 
-**Memory Type System** — 7 types with per-type TTLs: `event` (14d), `fact` (90d), `preference` (180d), `goal` (365d), `habit` (365d), `rule` (never), `context` (30d). Embedded as HTML metadata comments, invisible in rendered markdown.
+### Model settings
 
-**Observation Chunking** — clusters of 3+ related observations are compressed into a single chunk entry, achieving up to 75% token reduction. Source observations are archived; a chunk hook replaces them.
+Set your own model IDs here:
 
-**Importance Decay** — per-type daily decay applied to importance scores. Decay rates: `event` (-0.5/day), `fact` (-0.1/day), `preference` (-0.02/day), `rule`/`habit`/`goal` (no decay). Archive threshold is 3.0.
-
-**Pattern Promotion** — scans recent dream logs for recurring themes (3+ occurrences across 3+ separate days). Writes promotion proposals to `memory/dream-staging/` for human review. The `staging-review.sh` script handles list, show, approve, and reject.
-
-### How the Dream Cycle Works
-
-Nine stages run in sequence each night:
-
-```
-Stage 1: Preflight + backup
-Stage 2: Read observations.md, favorites.md, today's daily file
-Stage 3: Apply importance decay per memory type before classification
-Stage 4: Classify each observation by type and impact
-Stage 5: Chunk clusters of 3+ related observations
-Stage 6: Apply future-date protection (never archive reminders or deadlines)
-Stage 7: Decide archive set based on age + type thresholds
-Stage 8: Write archive file (memory/archive/observations/YYYY-MM-DD.md)
-Stage 9: Add semantic search hooks, scan for patterns, atomically update observations.md, validate, write dream log + metrics
+```yaml
+models:
+  rumination: <model-id>
+  classification: <model-id>
+  enrichment: <model-id>
+  ambient_actions: <model-id>
 ```
 
-Nothing is deleted. Every archived item gets a semantic hook in `observations.md` pointing back to the archive file, so your agent can still find it.
+The AIE scripts no longer hardcode user-specific model selections.
 
-### Setup: Dream Cycle Cron
+### Notification settings
 
-The Dream Cycle runs as a nightly cron via OpenClaw. Add a cron job at 3am (or whenever you sleep):
-
-```
-# Dream Cycle — nightly at 3am
-0 3 * * * OPENCLAW_WORKSPACE=~/your-workspace bash ~/your-workspace/skills/total-recall/scripts/dream-cycle.sh preflight
-```
-
-The actual analysis is run by a sub-agent using the prompt in `prompts/dream-cycle-prompt.md`. See [SKILL.md](SKILL.md) for the full setup and model configuration.
-
-Start with `READ_ONLY_MODE=true` for the first few nights. Check the dream log in `memory/dream-logs/`. When you're happy with what it would archive, switch to write mode.
-
-### Dream Cycle Directories
-
-The Dream Cycle writes to:
-
-```
-memory/
-  archive/
-    observations/        # Archived items (one file per night)
-    chunks/              # Chunked observation groups
-  dream-logs/            # Nightly run reports
-  dream-staging/         # Pattern promotion proposals awaiting human review
-  .dream-backups/        # Pre-run backups of observations.md
-research/
-  dream-cycle-metrics/
-    daily/               # JSON metrics for each night
+```yaml
+notifications:
+  quiet_hours:
+    enabled: true
+    timezone: UTC
+    start_hour: 22
+    end_hour: 7
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  discord:
+    enabled: false
+    webhook_url: ""
+  webhook:
+    enabled: false
+    url: ""
+    headers: {}
 ```
 
----
+`emergency-surface.sh` will only send through enabled channels. If no channel is enabled, it exits without error.
 
-## Articles
+### Path settings
 
-- [Your AI Has an Attention Problem](https://gavlahh.substack.com/p/your-ai-has-an-attention-problem) — How and why we built Total Recall
-- [I Published an AI Memory Fix. Then I Found the Hole.](https://gavlahh.substack.com/p/i-published-an-ai-memory-fix-then) — Finding and fixing our own blind spots
-- [Do Agents Dream of Electric Sheep? I Built One That Does.](https://gavlahh.substack.com/p/do-agents-dream) — The Dream Cycle: nightly memory consolidation with real numbers
+Everything that was previously tied to `~/clawd` is now configurable under `paths`, including:
+
+- event bus
+- sensor state
+- rumination directory
+- preconscious buffer
+- health data
+- log directory
+- `.env` file
+- optional web search helper path
+
+### Threshold settings
+
+Key defaults:
+
+```yaml
+thresholds:
+  rumination_cooldown_seconds: 1800
+  rumination_staleness_seconds: 14400
+  sensor_prune_hours: 48
+  emergency:
+    importance: 0.85
+    expires_within_seconds: 14400
+    max_alerts_per_day: 2
+```
+
+### Connector reference
+
+`calendar`
+
+- `account`
+- `calendar_id`
+- `lookahead_days`
+- `max_events`
+- `keyring_password`
+
+`gmail`
+
+- `account`
+- `unread_query`
+- `max_messages`
+- `keyring_password`
+
+`ionos`
+
+- `account`
+- `unread_limit`
+
+`connectors.high_importance_senders`
+
+- list of sender substrings that should raise email importance (default: empty)
+- add patterns for senders you care about most: your employer, accountant, school, doctor, bank, tax authority, etc.
+- example: `["mycompany", "school", "hospital", "accountant", "bank"]`
+
+`fitbit`
+
+- `sleep_target_hours`
+- `short_sleep_minutes`
+- `great_sleep_minutes`
+- `watch_off_minutes`
+- `watch_uncertain_minutes`
+- `resting_hr_threshold`
+- `weight_target_lbs`
+- `steps_milestone`
+
+`filewatch`
+
+- `watch_files`
+
+### Ambient action reference
+
+`ambient_actions`
+
+- `enabled`
+- `max_actions`
+- `action_budget_seconds`
+- `weather_url`
+- `places.default_lat`
+- `places.default_lng`
+- `places.default_limit`
+
+`ambient_actions.tool_settings`
+
+- `calendar_lookup.gog_account`
+- `calendar_lookup.gog_keyring_password`
+- `gmail_search.gog_account`
+- `gmail_search.gog_keyring_password`
+- `gmail_read.gog_account`
+- `gmail_read.gog_keyring_password`
+- `ionos_search.account`
+- `fitbit_data.enabled`
+- `openrouter_balance.enabled`
+- `web_search.enabled`
+- `web_search.script`
+- `places_lookup.enabled`
+
+## Existing v1.x Notes
+
+The original observer / reflector / dream-cycle flow still works as before. The v1.x scripts continue to read their existing environment variables and paths. The new AIE config does not remove that compatibility layer.
+
+See:
+
+- [`dream-cycle/README.md`](dream-cycle/README.md)
+- [`SKILL.md`](SKILL.md)
+- [`docs/architecture.md`](docs/architecture.md)
+
+## Repository Layout
+
+| Path | Purpose |
+|------|---------|
+| `scripts/observer-agent.sh` | v1.x observer |
+| `scripts/reflector-agent.sh` | v1.x reflector |
+| `scripts/dream-cycle.sh` | v1.x nightly consolidation helper |
+| `scripts/sensor-sweep.sh` | AIE connector orchestrator |
+| `scripts/rumination-engine.sh` | AIE reasoning pass |
+| `scripts/preconscious-select.sh` | buffer scorer/selector |
+| `scripts/ambient-actions.sh` | read-only enrichment loop |
+| `scripts/emergency-surface.sh` | urgent alert surfacing |
+| `scripts/buffer-inject.sh` | inject buffer back into active session |
+| `scripts/connectors/*.sh` | pluggable AIE sensors |
+| `config/aie.yaml` | AIE runtime configuration |
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-*"Get your ass to Mars." — Well, get your agent's memory to work.*
-
----
-
-*v1.5.1*
+MIT. See [`LICENSE`](LICENSE).
