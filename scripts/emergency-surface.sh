@@ -86,30 +86,53 @@ extract_buffer_summaries() {
   sed -n 's/^[^*]*\*\*\[[^]]*\]\*\* //p' "$BUFFER_FILE" 2>/dev/null
 }
 
-find_latest_rumination_file() {
-  ls -t "$RUMINATION_DIR"/*.jsonl 2>/dev/null | head -1
+# Parse score+summary directly from preconscious buffer because summary text may be LLM-rewritten
+# and no longer prefix-match the original rumination JSONL content.
+extract_buffer_score_summary_pairs() {
+  awk '
+    function trim(s) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+      return s
+    }
+    function emit(score, summary) {
+      score = trim(score)
+      summary = trim(summary)
+      if (score != "" && summary != "") {
+        print score "|||" summary
+      }
+    }
+    {
+      line = $0
+
+      if (line ~ /^[0-9]+([.][0-9]+)?\|\|\|/) {
+        split(line, parts, "\\|\\|\\|")
+        score = parts[1]
+        summary = substr(line, length(score) + 4)
+        emit(score, summary)
+        pending_summary = ""
+        next
+      }
+
+      summary_line = line
+      sub(/^[^*]*\*\*\[[^]]+\]\*\*[[:space:]]*/, "", summary_line)
+      if (summary_line != line) {
+        pending_summary = summary_line
+        next
+      }
+
+      if (pending_summary != "" && line ~ /_score:[[:space:]]*[0-9]+([.][0-9]+)?/) {
+        score_line = line
+        sub(/^.*_score:[[:space:]]*/, "", score_line)
+        sub(/[^0-9.].*$/, "", score_line)
+        emit(score_line, pending_summary)
+        pending_summary = ""
+      }
+    }
+  ' "$BUFFER_FILE" 2>/dev/null
 }
 
-find_matching_note_json() {
-  local summary="$1"
-  local rum_file="$2"
-  # Take first 80 chars of summary for matching (buffer truncates with ...)
-  local prefix
-  prefix="$(printf '%s' "$summary" | python3 -c 'import sys; print(sys.stdin.read()[:80], end="")' 2>/dev/null)"
-
-  # Search all rumination entries (newest first) for a note whose content starts with the prefix
-  local result=""
-  while IFS= read -r line; do
-    result="$(printf '%s' "$line" | jq -c --arg p "$prefix" '
-      .rumination_notes[]?
-      | select(.content | type == "string")
-      | select((.content | startswith($p)) or ($p | startswith(.content)))
-    ' 2>/dev/null | head -1)"
-    if [[ -n "$result" ]]; then
-      break
-    fi
-  done < <(tac "$rum_file" 2>/dev/null)
-  printf '%s' "$result"
+find_latest_rumination_file() {
+  ls -t "$RUMINATION_DIR"/*.jsonl 2>/dev/null | head -1
 }
 
 note_is_urgent_or_expiring() {
@@ -223,14 +246,6 @@ main() {
     exit 0
   fi
 
-  local rum_file
-  rum_file="$(find_latest_rumination_file)"
-  if [[ -z "$rum_file" || ! -f "$rum_file" ]]; then
-    log "No rumination file available. Skipping."
-    log "=== Emergency surfacing END ==="
-    exit 0
-  fi
-
   init_state_if_missing
   roll_state_if_new_day
 
@@ -253,46 +268,78 @@ main() {
   local candidate_summary=""
   local candidate_hash=""
   local note_json=""
+  local rum_file=""
+  local tmp_pairs
+  tmp_pairs="$(mktemp)"
+  extract_buffer_score_summary_pairs > "$tmp_pairs"
 
-  # Extract summaries to temp file to avoid nested process substitution issues
-  local tmp_summaries
-  tmp_summaries="$(mktemp)"
-  extract_buffer_summaries > "$tmp_summaries"
+  local scored_count
+  scored_count="$(wc -l < "$tmp_pairs" 2>/dev/null || echo 0)"
 
-  # Pre-reverse rumination file to avoid nested process substitution
-  local tmp_rum_rev
-  tmp_rum_rev="$(mktemp)"
-  tac "$rum_file" > "$tmp_rum_rev" 2>/dev/null
+  if ((scored_count > 0)); then
+    while IFS= read -r pair; do
+      [[ "$pair" == *"|||"* ]] || continue
+      local score summary
+      score="${pair%%|||*}"
+      summary="${pair#*|||}"
+      [[ -z "$summary" ]] && continue
 
-  while IFS= read -r summary; do
-    [[ -z "$summary" ]] && continue
+      awk -v imp="$score" -v threshold="$EMERGENCY_IMPORTANCE" 'BEGIN { exit (imp >= threshold ? 0 : 1) }' || continue
 
-    # Inline matching using pre-reversed rumination file
-    local prefix
-    prefix="${summary:0:60}"
-    note_json="$(jq -c --arg p "$prefix" '
-      .rumination_notes[]?
-      | select(.content | type == "string")
-      | select((.content | startswith($p)) or ($p | startswith(.content)))
-    ' "$tmp_rum_rev" 2>/dev/null | head -1)"
+      candidate_hash="$(hash_text "$(printf '%s|||%s' "$score" "$summary")")"
+      if already_sent_hash "$candidate_hash"; then
+        log "Duplicate alert candidate ignored."
+        continue
+      fi
 
-    [[ -z "$note_json" ]] && continue
+      candidate_summary="$summary"
+      break
+    done < "$tmp_pairs"
+  else
+    log "No scored entries found in preconscious buffer; using legacy JSONL fallback."
 
-    if ! note_is_urgent_or_expiring "$note_json"; then
-      continue
+    # Legacy fallback for older buffers that do not include score metadata.
+    rum_file="$(find_latest_rumination_file)"
+    if [[ -n "$rum_file" && -f "$rum_file" ]]; then
+      local tmp_summaries tmp_rum_rev
+      tmp_summaries="$(mktemp)"
+      tmp_rum_rev="$(mktemp)"
+      extract_buffer_summaries > "$tmp_summaries"
+      tac "$rum_file" > "$tmp_rum_rev" 2>/dev/null
+
+      while IFS= read -r summary; do
+        [[ -z "$summary" ]] && continue
+
+        local prefix
+        prefix="${summary:0:60}"
+        note_json="$(jq -c --arg p "$prefix" '
+          .rumination_notes[]?
+          | select(.content | type == "string")
+          | select((.content | startswith($p)) or ($p | startswith(.content)))
+        ' "$tmp_rum_rev" 2>/dev/null | head -1)"
+
+        [[ -z "$note_json" ]] && continue
+        if ! note_is_urgent_or_expiring "$note_json"; then
+          continue
+        fi
+
+        candidate_hash="$(hash_text "$(printf '%s' "$note_json" | jq -c '{content,importance,expires,tags,urgent,urgency,flags}')")"
+        if already_sent_hash "$candidate_hash"; then
+          log "Duplicate alert candidate ignored."
+          continue
+        fi
+
+        candidate_summary="$summary"
+        break
+      done < "$tmp_summaries"
+
+      rm -f "$tmp_summaries" "$tmp_rum_rev"
+    else
+      log "No rumination file available for legacy fallback."
     fi
+  fi
 
-    candidate_hash="$(hash_text "$(printf '%s' "$note_json" | jq -c '{content,importance,expires,tags,urgent,urgency,flags}')")"
-    if already_sent_hash "$candidate_hash"; then
-      log "Duplicate alert candidate ignored."
-      continue
-    fi
-
-    candidate_summary="$summary"
-    break
-  done < "$tmp_summaries"
-
-  rm -f "$tmp_summaries" "$tmp_rum_rev"
+  rm -f "$tmp_pairs"
 
   if [[ -z "$candidate_summary" ]]; then
     log "No emergency insight met threshold."
