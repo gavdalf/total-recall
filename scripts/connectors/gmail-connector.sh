@@ -149,8 +149,8 @@ fi
 
 health_check() {
   if ! run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-    gog gmail messages search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
-    log "ERROR: health_check failed — gog gmail unreachable"
+    gogcli gmail messages search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
+    log "ERROR: health_check failed — gogcli gmail unreachable"
     return 1
   fi
   log "health_check OK"
@@ -219,7 +219,7 @@ gmail_fetch_body_excerpt() {
   local body_candidate=""
 
   raw=$(run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-    gog gmail get "$msg_id" 2>/dev/null || true)
+    gogcli gmail get "$msg_id" 2>/dev/null || true)
   raw=$(printf '%s' "$raw" | head -c 200000)
 
   if [[ -n "$raw" ]] && printf '%s' "$raw" | jq -e . >/dev/null 2>&1; then
@@ -399,7 +399,7 @@ call_openrouter_batch() {
 
   [[ -z "$response" ]] && return 1
 
-  content=$(printf '%s' "$response" | jq -r 'try .choices[0].message.content // empty catch empty' 2>/dev/null || true)
+  content=$(printf '%s' "$response" | jq -r 'try (.choices[0].message.content) catch empty' 2>/dev/null || true)
   [[ -z "$content" ]] && return 1
 
   arr=$(extract_llm_content_array "$content") || return 1
@@ -432,7 +432,7 @@ SENDER_CACHE=$(sanitize_sender_cache "$(load_json_object_file "$SENDER_CACHE_FIL
 CACHE_UPDATES='{}'
 
 EMAILS_RAW=$(run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-  gog gmail messages search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json 2>/dev/null || echo '{"messages":[]}')
+  gogcli gmail messages search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json 2>/dev/null || echo '{"messages":[]}')
 EMAILS=$(printf '%s' "$EMAILS_RAW" | jq -c '
   if type == "array" then
     .
@@ -450,16 +450,16 @@ printf '%s\n' "$EMAILS" | jq -c '.[]?' 2>/dev/null > "$TMP_EMAILS" || true
 while IFS= read -r email; do
   [[ -z "$email" ]] && continue
 
-  msg_id=$(printf '%s' "$email" | jq -r 'try .id // empty catch empty' 2>/dev/null || true)
+  msg_id=$(printf '%s' "$email" | jq -r 'try (.id) catch empty' 2>/dev/null || true)
   [[ -z "$msg_id" ]] && continue
 
-  subject=$(printf '%s' "$email" | jq -r 'try .subject // "No subject" catch "No subject"' 2>/dev/null | tr -d '\000' | cut -c1-200)
-  from=$(printf '%s' "$email" | jq -r 'try .from // "" catch ""' 2>/dev/null | tr -d '\000' | cut -c1-180)
-  date_str=$(printf '%s' "$email" | jq -r 'try .date // "" catch ""' 2>/dev/null | tr -d '\000' | cut -c1-100)
+  subject=$(printf '%s' "$email" | jq -r 'try (.subject) catch "No subject"' 2>/dev/null | tr -d '\000' | cut -c1-200)
+  from=$(printf '%s' "$email" | jq -r 'try (.from) catch ""' 2>/dev/null | tr -d '\000' | cut -c1-180)
+  date_str=$(printf '%s' "$email" | jq -r 'try (.date) catch ""' 2>/dev/null | tr -d '\000' | cut -c1-100)
   bus_id="gmail-${msg_id:0:40}"
 
-  prev=$(printf '%s' "$PREV_STATE" | jq -r --arg id "$bus_id" 'try .[$id] // "" catch ""' 2>/dev/null || true)
-  [[ -n "$prev" ]] && continue
+  prev=$(printf '%s' "$PREV_STATE" | jq -r --arg id "$bus_id" 'try (.[$id]) catch ""' 2>/dev/null || true)
+  [[ -n "$prev" && "$prev" != "null" ]] && continue
 
   domain=$(extract_sender_domain "$from")
   gate_result=$(sender_gate_score "$domain" "$SENDER_CACHE" "$SCORING_CACHE_THRESHOLD")
@@ -511,21 +511,21 @@ fi
 while IFS= read -r item; do
   [[ -z "$item" ]] && continue
 
-  bus_id=$(printf '%s' "$item" | jq -r 'try .bus_id // empty catch empty' 2>/dev/null || true)
-  msg_id=$(printf '%s' "$item" | jq -r 'try .msg_id // empty catch empty' 2>/dev/null || true)
-  subject=$(printf '%s' "$item" | jq -r 'try .subject // "No subject" catch "No subject"' 2>/dev/null || true)
-  from=$(printf '%s' "$item" | jq -r 'try .from // "" catch ""' 2>/dev/null || true)
-  date_str=$(printf '%s' "$item" | jq -r 'try .date // "" catch ""' 2>/dev/null || true)
-  domain=$(printf '%s' "$item" | jq -r 'try .domain // "" catch ""' 2>/dev/null || true)
-  gate=$(printf '%s' "$item" | jq -r 'try .gate // "" catch ""' 2>/dev/null || true)
+  bus_id=$(printf '%s' "$item" | jq -r 'try (.bus_id) catch empty' 2>/dev/null || true)
+  msg_id=$(printf '%s' "$item" | jq -r 'try (.msg_id) catch empty' 2>/dev/null || true)
+  subject=$(printf '%s' "$item" | jq -r 'try (.subject) catch "No subject"' 2>/dev/null || true)
+  from=$(printf '%s' "$item" | jq -r 'try (.from) catch ""' 2>/dev/null || true)
+  date_str=$(printf '%s' "$item" | jq -r 'try (.date) catch ""' 2>/dev/null || true)
+  domain=$(printf '%s' "$item" | jq -r 'try (.domain) catch ""' 2>/dev/null || true)
+  gate=$(printf '%s' "$item" | jq -r 'try (.gate) catch ""' 2>/dev/null || true)
 
   [[ -z "$bus_id" || -z "$msg_id" ]] && continue
 
   importance=""
   if [[ "$gate" == "gate1_high" || "$gate" == "gate1_low" ]]; then
-    importance=$(printf '%s' "$item" | jq -r 'try .importance // 0.5 catch 0.5' 2>/dev/null || echo "0.5")
+    importance=$(printf '%s' "$item" | jq -r 'try (.importance) catch 0.5' 2>/dev/null || echo "0.5")
   else
-    llm_score=$(printf '%s' "$SCORE_MAP" | jq -r --arg id "$msg_id" 'try .[$id] // empty catch empty' 2>/dev/null || true)
+    llm_score=$(printf '%s' "$SCORE_MAP" | jq -r --arg id "$msg_id" 'try (.[$id]) catch empty' 2>/dev/null || true)
     if [[ -n "$llm_score" ]]; then
       importance="$llm_score"
       gate="gate2_llm"

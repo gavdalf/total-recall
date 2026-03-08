@@ -44,7 +44,7 @@ log() {
 
 health_check() {
   if ! GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
-      gog calendar events "$CALENDAR_ID" --days 1 --max 1 --json >/dev/null 2>&1; then
+      gogcli calendar events "$CALENDAR_ID" --days 1 --max 1 --json >/dev/null 2>&1; then
     log "ERROR: health_check failed — gog calendar not reachable (auth expiry?)"
     exit 1
   fi
@@ -86,7 +86,7 @@ PREV_STATE="{}"
 
 # Fetch events for next 48 hours (--days 2)
 RAW=$(GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
-      gog calendar events "$CALENDAR_ID" --days "$LOOKAHEAD_DAYS" --max "$MAX_EVENTS" --json 2>/dev/null || echo '{"events":[]}')
+      gogcli calendar events "$CALENDAR_ID" --days "$LOOKAHEAD_DAYS" --max "$MAX_EVENTS" --json 2>/dev/null || echo '{"events":[]}')
 
 # Handle both array and object wrapper formats
 EVENTS=$(echo "$RAW" | jq -c 'if type == "array" then .[] else .events[]? end' 2>/dev/null || echo "")
