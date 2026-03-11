@@ -50,6 +50,20 @@ When a message references a future or past date, include BOTH:
 - The absolute date: "2026-02-14 (Friday)"
 - The relative offset: "3 days from today"
 
+## Temporal Context Awareness
+Consider WHEN things were said, not just WHAT was said. The timestamp is part of the observation.
+
+**What to notice:**
+- Time of day: early morning, working hours, evening, late night. Note it when relevant.
+- Day of week: weekday vs weekend, start of week vs end of week. The same message carries different weight depending on when it's said.
+- Conversation gaps: if there's a 30+ minute gap between message clusters, something happened offline. Note the gap. If tone or topic shifts after a gap, that's especially worth recording.
+
+**How to apply:**
+- Include temporal context in observations when it adds meaning
+- Example: "🟡 08:45 Discussed deadline concerns (Monday morning, start of work week)" rather than just "discussed deadline concerns"
+- Let the content speak for itself. Record the time and context, don't interpret emotional state from timing alone.
+- Don't force temporal notes on every observation. Only when the timing genuinely changes or adds to the meaning.
+
 ## Deduplication (CRITICAL — ZERO TOLERANCE)
 - If "Already Recorded" observations are provided, DO NOT repeat any of them — not even rephrased
 - Check EVERY observation you're about to output against the "Already Recorded" list

@@ -213,7 +213,9 @@ fi
 # Write user content to temp file (avoids jq --arg issues with special chars in messages)
 MSGS_TMP=$(mktemp)
 {
-  printf 'Today is %s. Compress these recent messages into observations:\n\n%s' "$TODAY" "$RECENT_MESSAGES"
+  DAYNAME=$(date '+%A')
+  CURTIME=$(date '+%H:%M')
+  printf 'Today is %s (%s), current time is %s.\n\nCompress these recent messages into observations:\n\n%s' "$TODAY" "$DAYNAME" "$CURTIME" "$RECENT_MESSAGES"
   if [ -n "$EXISTING_TAIL" ]; then
     printf '\n\n## Already Recorded (DO NOT repeat these — they are already in memory)\n%s' "$EXISTING_TAIL"
   fi

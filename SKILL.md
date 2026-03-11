@@ -247,10 +247,18 @@ The Dream Cycle is an optional nightly agent that runs after hours to consolidat
 
 1. Run `bash skills/total-recall/scripts/setup.sh` — creates Dream Cycle directories automatically.
 
-2. Add the nightly cron job:
+2. Add the nightly cron job as a full agent turn:
    ```
-   # Dream Cycle — nightly at 3am
-   0 3 * * * OPENCLAW_WORKSPACE=~/your-workspace bash ~/your-workspace/skills/total-recall/scripts/dream-cycle.sh preflight
+   # Dream Cycle — nightly (3am recommended; adjust to your timezone)
+   # The dream cycle runs as a full agent turn — NOT as a direct bash call.
+   # dream-cycle.sh is a file operations helper called BY the agent, not the entry point.
+   #
+   # 0 3 * * * bash -c 'source ~/.openclaw/shared/secrets/openclaw-secrets.env \
+   #   && openclaw agent --agent main \
+   #   --message "Run the Total Recall Dream Cycle. Follow the instructions in \
+   # $WORKSPACE/skills/total-recall/prompts/dream-cycle-prompt.md exactly. \
+   # Use READ_ONLY_MODE=false and DREAM_PHASE=1." \
+   #   --json >> $WORKSPACE/logs/dream-cycle.log 2>&1'
    ```
 
 3. Configure your cron agent using `prompts/dream-cycle-prompt.md` as the system prompt. Recommended models: Claude Sonnet for the Dreamer (analysis + decisions), DeepSeek v3.2 for the Observer (cheap, fast).
@@ -270,7 +278,7 @@ The Dream Cycle is an optional nightly agent that runs after hours to consolidat
 
 | File | Description |
 |------|-------------|
-| `scripts/dream-cycle.sh` | Shell helper: preflight, archive, update-observations, write-log, write-metrics, validate, rollback |
+| `scripts/dream-cycle.sh` | Shell helper called **by the agent** (not a standalone runner): preflight, archive, update-observations, write-log, write-metrics, validate, rollback |
 | `prompts/dream-cycle-prompt.md` | Agent prompt for the nightly Dream Cycle run |
 | `dream-cycle/README.md` | Dream Cycle quick reference |
 | `schemas/observation-format.md` | Extended observation metadata format |
