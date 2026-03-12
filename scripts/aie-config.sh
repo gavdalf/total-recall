@@ -7,6 +7,8 @@ fi
 readonly AIE_CONFIG_SH_LOADED=1
 
 AIE_CONFIG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Load cross-platform compat layer (sha256_hash, iso_to_epoch, portable_flock, etc.)
+source "$AIE_CONFIG_SCRIPT_DIR/_compat.sh"
 AIE_REPO_ROOT="$(cd "${AIE_CONFIG_SCRIPT_DIR}/.." && pwd)"
 AIE_DEFAULT_WORKSPACE="${OPENCLAW_WORKSPACE:-$AIE_REPO_ROOT}"
 AIE_CONFIG_FILE="${AIE_CONFIG_FILE:-${AIE_DEFAULT_WORKSPACE}/config/aie.yaml}"

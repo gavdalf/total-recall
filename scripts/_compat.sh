@@ -2,6 +2,11 @@
 # Cross-platform compatibility helpers (Linux + macOS)
 # Sourced by other scripts — not run directly
 
+if [[ -n "${_COMPAT_SH_LOADED:-}" ]]; then
+  return 0
+fi
+readonly _COMPAT_SH_LOADED=1
+
 # Detect OS
 _IS_MACOS=false
 [[ "$(uname -s)" == "Darwin" ]] && _IS_MACOS=true
@@ -25,6 +30,83 @@ date_minutes_ago() {
   fi
 }
 
+# Get date N days ago as YYYY-MM-DD (portable)
+date_days_ago() {
+  local days="$1"
+  if $_IS_MACOS; then
+    date -u -v "-${days}d" '+%Y-%m-%d'
+  else
+    date -d "-${days} days" '+%Y-%m-%d' 2>/dev/null || echo ""
+  fi
+}
+
+# Get date N days ahead as YYYY-MM-DD (portable)
+date_days_ahead() {
+  local days="$1"
+  if $_IS_MACOS; then
+    date -u -v "+${days}d" '+%Y-%m-%d'
+  else
+    date -d "+${days} days" '+%Y-%m-%d' 2>/dev/null || echo ""
+  fi
+}
+
+# Get date N hours ago as ISO UTC (portable)
+date_hours_ago() {
+  local hours="$1"
+  if $_IS_MACOS; then
+    date -u -v "-${hours}H" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -d "${hours} hours ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo ""
+  fi
+}
+
+# Convert ISO timestamp to epoch seconds (portable)
+iso_to_epoch() {
+  local iso="$1"
+  if $_IS_MACOS; then
+    # Strip trailing Z, parse with -jf
+    local clean="${iso%Z}"
+    date -jf '%Y-%m-%dT%H:%M:%S' "$clean" '+%s' 2>/dev/null || echo ""
+  else
+    date -u -d "$iso" '+%s' 2>/dev/null || echo ""
+  fi
+}
+
+# Convert ISO date (YYYY-MM-DD) to epoch seconds (portable)
+iso_date_to_epoch() {
+  local iso="$1"
+  if $_IS_MACOS; then
+    date -jf '%Y-%m-%d' "$iso" '+%s' 2>/dev/null || echo 0
+  else
+    date -d "$iso" '+%s' 2>/dev/null || echo 0
+  fi
+}
+
+# Convert date string to ISO UTC (portable, best-effort)
+date_to_iso_utc() {
+  local input="$1"
+  if $_IS_MACOS; then
+    # Try common formats
+    date -juf '%Y-%m-%dT%H:%M:%S%z' "$input" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+      || date -juf '%Y-%m-%dT%H:%M:%SZ' "$input" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+      || echo ""
+  else
+    date -u -d "$input" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo ""
+  fi
+}
+
+# SHA-256 hash of stdin (portable)
+sha256_hash() {
+  if command -v sha256sum &>/dev/null; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 | awk '{print $1}'
+  else
+    # Last resort: openssl
+    openssl dgst -sha256 | awk '{print $NF}'
+  fi
+}
+
 # MD5 hash of stdin (portable)
 md5_hash() {
   if command -v md5sum &>/dev/null; then
@@ -34,6 +116,103 @@ md5_hash() {
   else
     # Last resort: use shasum
     shasum | cut -d' ' -f1
+  fi
+}
+
+# Portable exclusive file lock wrapper
+# Usage: portable_flock <lockfile> <command...>
+# Replaces: ( flock -x 200; cmd ) 200>lockfile
+portable_flock() {
+  local lockfile="$1"
+  shift
+  if command -v flock &>/dev/null; then
+    ( flock -x 200; "$@" ) 200>"$lockfile"
+  else
+    # macOS fallback: mkdir-based atomic lock with retry
+    local lock_dir="${lockfile}.d"
+    local retries=0
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+      retries=$((retries + 1))
+      if ((retries > 50)); then
+        # Stale lock — remove and retry
+        rm -rf "$lock_dir"
+        mkdir "$lock_dir" 2>/dev/null || true
+        break
+      fi
+      sleep 0.1
+    done
+    # Ensure lock dir is cleaned up on signals (Ctrl+C, kill, etc.)
+    trap 'rm -rf "$lock_dir"' INT TERM
+    "$@"
+    local rc=$?
+    trap - INT TERM
+    rm -rf "$lock_dir"
+    return $rc
+  fi
+}
+
+# Portable exclusive flock with file-descriptor redirection
+# Usage: portable_flock_fd <fd_num> <lockfile>
+# For use in: ( portable_flock_fd 200 "$LOCK"; echo "$data" >> "$FILE" ) 200>"$LOCK"
+# On macOS this is a no-op (caller should use portable_flock instead)
+portable_flock_fd() {
+  if command -v flock &>/dev/null; then
+    flock -x "$1"
+  fi
+  # On macOS without flock: no-op, caller must use portable_flock wrapper
+}
+
+# Atomically append a line to a file with exclusive locking (portable)
+# Usage: bus_append <lockfile> <target_file> <data>
+bus_append() {
+  local lockfile="$1" target="$2" data="$3"
+  if command -v flock &>/dev/null; then
+    ( flock -x 200; printf '%s\n' "$data" >> "$target" ) 200>"$lockfile"
+  else
+    local lock_dir="${lockfile}.d"
+    local retries=0
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+      retries=$((retries + 1))
+      if ((retries > 50)); then rm -rf "$lock_dir"; mkdir "$lock_dir" 2>/dev/null || true; break; fi
+      sleep 0.1
+    done
+    printf '%s\n' "$data" >> "$target"
+    rm -rf "$lock_dir"
+  fi
+}
+
+# Non-blocking lock attempt (portable)
+# Usage: if try_lock <lockfile> <fd_num>; then ...; fi
+# Returns 0 if lock acquired, 1 if another instance holds it
+try_lock() {
+  local lockfile="$1" fd="${2:-9}"
+  if command -v flock &>/dev/null; then
+    eval "exec ${fd}>\"${lockfile}\""
+    flock -n "$fd" 2>/dev/null
+  else
+    local lock_dir="${lockfile}.d"
+    mkdir "$lock_dir" 2>/dev/null
+  fi
+}
+
+# Rotate a log file if it exceeds a size limit (default 1MB)
+# Usage: rotate_log <logfile> [max_bytes]
+rotate_log() {
+  local logfile="$1"
+  local max_bytes="${2:-1048576}"  # 1MB default
+  [ -f "$logfile" ] || return 0
+  local size
+  if $_IS_MACOS; then
+    size=$(stat -f %z "$logfile" 2>/dev/null || echo 0)
+  else
+    size=$(stat -c %s "$logfile" 2>/dev/null || echo 0)
+  fi
+  if (( size > max_bytes )); then
+    # Keep last 500 lines, rotate the rest
+    local tmp
+    tmp="$(mktemp)"
+    tail -500 "$logfile" > "$tmp" 2>/dev/null
+    mv "$tmp" "$logfile"
   fi
 }
 
