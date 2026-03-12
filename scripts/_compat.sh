@@ -136,16 +136,26 @@ portable_flock() {
       if ((retries > 50)); then
         # Stale lock — remove and retry
         rm -rf "$lock_dir"
-        mkdir "$lock_dir" 2>/dev/null || true
-        break
+        if mkdir "$lock_dir" 2>/dev/null; then
+          break
+        fi
+        # Another process grabbed it — keep waiting
+        retries=0
+        continue
       fi
       sleep 0.1
     done
-    # Ensure lock dir is cleaned up on signals (Ctrl+C, kill, etc.)
-    trap 'rm -rf "$lock_dir"' INT TERM
+    # Save existing signal traps before overwriting
+    local _prev_int _prev_term
+    _prev_int=$(trap -p INT)
+    _prev_term=$(trap -p TERM)
+    trap "rm -rf \"$lock_dir\"; ${_prev_int:-:}; exit 130" INT
+    trap "rm -rf \"$lock_dir\"; ${_prev_term:-:}; exit 143" TERM
     "$@"
     local rc=$?
-    trap - INT TERM
+    # Restore previous traps
+    if [[ -n "$_prev_int" ]]; then eval "$_prev_int"; else trap - INT; fi
+    if [[ -n "$_prev_term" ]]; then eval "$_prev_term"; else trap - TERM; fi
     rm -rf "$lock_dir"
     return $rc
   fi
@@ -158,8 +168,11 @@ portable_flock() {
 portable_flock_fd() {
   if command -v flock &>/dev/null; then
     flock -x "$1"
+  else
+    # macOS without flock: warn caller so they know locking is not happening
+    echo "[_compat] WARNING: portable_flock_fd is a no-op on macOS (no flock). Use portable_flock instead." >&2
+    return 1
   fi
-  # On macOS without flock: no-op, caller must use portable_flock wrapper
 }
 
 # Atomically append a line to a file with exclusive locking (portable)
@@ -191,7 +204,26 @@ try_lock() {
     flock -n "$fd" 2>/dev/null
   else
     local lock_dir="${lockfile}.d"
-    mkdir "$lock_dir" 2>/dev/null
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+      return 1
+    fi
+    # Ensure lock dir is cleaned up on signals
+    local _prev_int _prev_term
+    _prev_int=$(trap -p INT)
+    _prev_term=$(trap -p TERM)
+    trap "rm -rf \"$lock_dir\"; ${_prev_int:-:}; exit 130" INT
+    trap "rm -rf \"$lock_dir\"; ${_prev_term:-:}; exit 143" TERM
+  fi
+}
+
+# Release a lock acquired by try_lock (portable)
+# Usage: release_lock <lockfile>
+# On Linux with flock this is a no-op (lock auto-releases on fd close).
+# On macOS this removes the mkdir-based lock directory.
+release_lock() {
+  local lockfile="$1"
+  if ! command -v flock &>/dev/null; then
+    rm -rf "${lockfile}.d"
   fi
 }
 
