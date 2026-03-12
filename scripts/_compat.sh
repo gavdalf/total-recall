@@ -36,7 +36,7 @@ date_days_ago() {
   if $_IS_MACOS; then
     date -u -v "-${days}d" '+%Y-%m-%d'
   else
-    date -d "-${days} days" '+%Y-%m-%d' 2>/dev/null || echo ""
+    date -u -d "-${days} days" '+%Y-%m-%d' 2>/dev/null || echo ""
   fi
 }
 
@@ -46,7 +46,7 @@ date_days_ahead() {
   if $_IS_MACOS; then
     date -u -v "+${days}d" '+%Y-%m-%d'
   else
-    date -d "+${days} days" '+%Y-%m-%d' 2>/dev/null || echo ""
+    date -u -d "+${days} days" '+%Y-%m-%d' 2>/dev/null || echo ""
   fi
 }
 
@@ -146,16 +146,16 @@ portable_flock() {
       sleep 0.1
     done
     # Save existing signal traps before overwriting
-    local _prev_int _prev_term
-    _prev_int=$(trap -p INT)
-    _prev_term=$(trap -p TERM)
-    trap "rm -rf \"$lock_dir\"; ${_prev_int:-:}; exit 130" INT
-    trap "rm -rf \"$lock_dir\"; ${_prev_term:-:}; exit 143" TERM
+    local _prev_int_cmd _prev_term_cmd
+    _prev_int_cmd=$(trap -p INT | sed "s/^trap -- '//;s/' INT$//" 2>/dev/null)
+    _prev_term_cmd=$(trap -p TERM | sed "s/^trap -- '//;s/' TERM$//" 2>/dev/null)
+    trap "rm -rf \"$lock_dir\"; ${_prev_int_cmd:-:}; exit 130" INT
+    trap "rm -rf \"$lock_dir\"; ${_prev_term_cmd:-:}; exit 143" TERM
     "$@"
     local rc=$?
-    # Restore previous traps
-    if [[ -n "$_prev_int" ]]; then eval "$_prev_int"; else trap - INT; fi
-    if [[ -n "$_prev_term" ]]; then eval "$_prev_term"; else trap - TERM; fi
+    # Restore original traps
+    if [[ -n "$_prev_int_cmd" ]]; then eval "trap -- '$_prev_int_cmd' INT"; else trap - INT; fi
+    if [[ -n "$_prev_term_cmd" ]]; then eval "trap -- '$_prev_term_cmd' TERM"; else trap - TERM; fi
     rm -rf "$lock_dir"
     return $rc
   fi
@@ -208,11 +208,11 @@ try_lock() {
       return 1
     fi
     # Ensure lock dir is cleaned up on signals
-    local _prev_int _prev_term
-    _prev_int=$(trap -p INT)
-    _prev_term=$(trap -p TERM)
-    trap "rm -rf \"$lock_dir\"; ${_prev_int:-:}; exit 130" INT
-    trap "rm -rf \"$lock_dir\"; ${_prev_term:-:}; exit 143" TERM
+    # Store in module-level vars so release_lock can restore them
+    _OPENCLAW_LOCK_PREV_INT=$(trap -p INT | sed "s/^trap -- '//;s/' INT$//" 2>/dev/null)
+    _OPENCLAW_LOCK_PREV_TERM=$(trap -p TERM | sed "s/^trap -- '//;s/' TERM$//" 2>/dev/null)
+    trap "rm -rf \"$lock_dir\"; ${_OPENCLAW_LOCK_PREV_INT:-:}; exit 130" INT
+    trap "rm -rf \"$lock_dir\"; ${_OPENCLAW_LOCK_PREV_TERM:-:}; exit 143" TERM
   fi
 }
 
@@ -224,6 +224,18 @@ release_lock() {
   local lockfile="$1"
   if ! command -v flock &>/dev/null; then
     rm -rf "${lockfile}.d"
+    # Restore original signal traps
+    if [[ -n "${_OPENCLAW_LOCK_PREV_INT:-}" ]]; then
+      eval "trap -- '$_OPENCLAW_LOCK_PREV_INT' INT"
+    else
+      trap - INT
+    fi
+    if [[ -n "${_OPENCLAW_LOCK_PREV_TERM:-}" ]]; then
+      eval "trap -- '$_OPENCLAW_LOCK_PREV_TERM' TERM"
+    else
+      trap - TERM
+    fi
+    unset _OPENCLAW_LOCK_PREV_INT _OPENCLAW_LOCK_PREV_TERM
   fi
 }
 
