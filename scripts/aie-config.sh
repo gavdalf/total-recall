@@ -8,7 +8,8 @@ readonly AIE_CONFIG_SH_LOADED=1
 
 AIE_CONFIG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Load cross-platform compat layer (sha256_hash, iso_to_epoch, portable_flock, etc.)
-source "$AIE_CONFIG_SCRIPT_DIR/_compat.sh"
+source "$AIE_CONFIG_SCRIPT_DIR/_compat.sh" \
+  || { echo "[aie-config] WARNING: failed to load _compat.sh" >&2; }
 AIE_REPO_ROOT="$(cd "${AIE_CONFIG_SCRIPT_DIR}/.." && pwd)"
 AIE_DEFAULT_WORKSPACE="${OPENCLAW_WORKSPACE:-$AIE_REPO_ROOT}"
 AIE_CONFIG_FILE="${AIE_CONFIG_FILE:-${AIE_DEFAULT_WORKSPACE}/config/aie.yaml}"
@@ -210,7 +211,7 @@ if os.path.exists(config_file):
         raise SystemExit("AIE config must be a YAML mapping at the top level")
     merge(config, loaded)
 
-today = __import__("datetime").datetime.now(__import__("datetime").UTC).strftime("%Y-%m-%d")
+today = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m-%d")
 config["workspace"] = os.path.abspath(os.path.expanduser(str(config.get("workspace") or workspace)))
 
 def expand_path(value, base_dir):

@@ -29,7 +29,12 @@ export TMP_NOTES
 trap 'rm -f "$TMP_NOTES"' EXIT
 
 for i in 0 1 2 3 4 5 6; do
-  DAY=$(date -d "-${i} days" +%Y-%m-%d 2>/dev/null || echo "")
+  # Portable date: -d for Linux, -v for macOS
+  if date -d "-${i} days" +%Y-%m-%d >/dev/null 2>&1; then
+    DAY=$(date -d "-${i} days" +%Y-%m-%d)
+  else
+    DAY=$(date -v"-${i}d" +%Y-%m-%d 2>/dev/null || echo "")
+  fi
   [[ -z "$DAY" ]] && continue
   FILE="$RUMINATION_DIR/${DAY}.jsonl"
   [[ -f "$FILE" ]] || continue

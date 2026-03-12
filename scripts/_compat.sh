@@ -64,9 +64,9 @@ date_hours_ago() {
 iso_to_epoch() {
   local iso="$1"
   if $_IS_MACOS; then
-    # Strip trailing Z, parse with -jf
+    # Strip trailing Z, parse as UTC with -juf
     local clean="${iso%Z}"
-    date -jf '%Y-%m-%dT%H:%M:%S' "$clean" '+%s' 2>/dev/null || echo ""
+    date -juf '%Y-%m-%dT%H:%M:%S' "$clean" '+%s' 2>/dev/null || echo ""
   else
     date -u -d "$iso" '+%s' 2>/dev/null || echo ""
   fi
@@ -76,7 +76,7 @@ iso_to_epoch() {
 iso_date_to_epoch() {
   local iso="$1"
   if $_IS_MACOS; then
-    date -jf '%Y-%m-%d' "$iso" '+%s' 2>/dev/null || echo 0
+    date -juf '%Y-%m-%d' "$iso" '+%s' 2>/dev/null || echo 0
   else
     date -d "$iso" '+%s' 2>/dev/null || echo 0
   fi
@@ -134,7 +134,14 @@ portable_flock() {
     while ! mkdir "$lock_dir" 2>/dev/null; do
       retries=$((retries + 1))
       if ((retries > 50)); then
-        # Stale lock — remove and retry
+        # Stale lock — check if owner PID is still alive
+        local owner_pid
+        owner_pid=$(cat "${lock_dir}/pid" 2>/dev/null)
+        if [[ -n "$owner_pid" ]] && kill -0 "$owner_pid" 2>/dev/null; then
+          # Owner is alive — keep waiting
+          retries=0
+          continue
+        fi
         rm -rf "$lock_dir"
         if mkdir "$lock_dir" 2>/dev/null; then
           break
@@ -145,6 +152,7 @@ portable_flock() {
       fi
       sleep 0.1
     done
+    echo $$ > "${lock_dir}/pid" 2>/dev/null
     # Save existing signal traps before overwriting
     local _prev_int_cmd _prev_term_cmd
     _prev_int_cmd=$(trap -p INT | sed "s/^trap -- '//;s/' INT$//" 2>/dev/null)
@@ -186,10 +194,28 @@ bus_append() {
     local retries=0
     while ! mkdir "$lock_dir" 2>/dev/null; do
       retries=$((retries + 1))
-      if ((retries > 50)); then rm -rf "$lock_dir"; mkdir "$lock_dir" 2>/dev/null || true; break; fi
+      if ((retries > 50)); then
+        # Stale lock — check if owner PID is still alive
+        local owner_pid
+        owner_pid=$(cat "${lock_dir}/pid" 2>/dev/null)
+        if [[ -n "$owner_pid" ]] && kill -0 "$owner_pid" 2>/dev/null; then
+          # Owner is alive — keep waiting
+          retries=0
+          continue
+        fi
+        rm -rf "$lock_dir"
+        if mkdir "$lock_dir" 2>/dev/null; then
+          break
+        fi
+        retries=0
+        continue
+      fi
       sleep 0.1
     done
+    echo $$ > "${lock_dir}/pid" 2>/dev/null
+    trap "rm -rf \"$lock_dir\"" INT TERM
     printf '%s\n' "$data" >> "$target"
+    trap - INT TERM
     rm -rf "$lock_dir"
   fi
 }
@@ -202,11 +228,14 @@ try_lock() {
   if command -v flock &>/dev/null; then
     eval "exec ${fd}>\"${lockfile}\""
     flock -n "$fd" 2>/dev/null
+    # Store fd so release_lock can close it
+    _OPENCLAW_LOCK_FD="$fd"
   else
     local lock_dir="${lockfile}.d"
     if ! mkdir "$lock_dir" 2>/dev/null; then
       return 1
     fi
+    echo $$ > "${lock_dir}/pid" 2>/dev/null
     # Ensure lock dir is cleaned up on signals
     # Store in module-level vars so release_lock can restore them
     _OPENCLAW_LOCK_PREV_INT=$(trap -p INT | sed "s/^trap -- '//;s/' INT$//" 2>/dev/null)
@@ -217,12 +246,14 @@ try_lock() {
 }
 
 # Release a lock acquired by try_lock (portable)
-# Usage: release_lock <lockfile>
-# On Linux with flock this is a no-op (lock auto-releases on fd close).
-# On macOS this removes the mkdir-based lock directory.
+# Usage: release_lock <lockfile> [fd_num]
+# On Linux: closes the flock fd. On macOS: removes the lock directory.
 release_lock() {
-  local lockfile="$1"
-  if ! command -v flock &>/dev/null; then
+  local lockfile="$1" fd="${2:-${_OPENCLAW_LOCK_FD:-9}}"
+  if command -v flock &>/dev/null; then
+    eval "exec ${fd}>&-" 2>/dev/null
+    unset _OPENCLAW_LOCK_FD
+  else
     rm -rf "${lockfile}.d"
     # Restore original signal traps
     if [[ -n "${_OPENCLAW_LOCK_PREV_INT:-}" ]]; then
