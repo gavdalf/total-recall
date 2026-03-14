@@ -310,7 +310,9 @@ aie_load_env() {
   if [[ -f "$AIE_ENV_FILE" ]]; then
     set -a
     # shellcheck disable=SC1090
-    source "$AIE_ENV_FILE" 2>/dev/null || true
+    if ! source "$AIE_ENV_FILE" 2>/dev/null; then
+      echo "WARN: Failed to load $AIE_ENV_FILE; check shell syntax and variable references" >&2
+    fi
     set +a
   fi
 }
