@@ -27,6 +27,18 @@ for bin in jq curl; do
     MISSING=1
   fi
 done
+echo "Checking Python dependencies..."
+if ! command -v python3 &>/dev/null; then
+  echo "❌ Missing: python3"
+  MISSING=1
+elif ! python3 -c 'import yaml' &>/dev/null 2>&1; then
+  echo "❌ Missing Python dependency: PyYAML"
+  echo "   Install with: sudo apt install python3-yaml  (Debian/Ubuntu)"
+  echo "   Or:           python3 -m pip install PyYAML"
+  MISSING=1
+else
+  echo "✅ python3 + PyYAML found"
+fi
 if [ "$MISSING" -eq 1 ]; then
   echo ""
   echo "Install missing dependencies and re-run setup."
@@ -46,20 +58,35 @@ else
   fi
 fi
 
-# --- Check API key ---
+# --- Load .env and check API key ---
 if [ -f "$WORKSPACE/.env" ]; then
   set -a
-  # Only load OPENROUTER_API_KEY (minimal credential exposure)
-  eval "$(grep -E '^OPENROUTER_API_KEY=' "$WORKSPACE/.env" 2>/dev/null)" || true
+  if ! source "$WORKSPACE/.env" 2>/dev/null; then
+    echo "⚠️  Failed to source $WORKSPACE/.env — check for shell syntax errors"
+  fi
   set +a
 fi
-if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+
+# Normalize provider vars (LLM_API_KEY preferred; OPENROUTER_API_KEY backward-compatible)
+LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
+LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
+
+if [ -z "${LLM_API_KEY:-}" ]; then
   echo ""
-  echo "⚠️  OPENROUTER_API_KEY not found in environment or $WORKSPACE/.env"
-  echo "   The observer needs this to call the LLM. Add it to your .env file:"
-  echo "   echo 'OPENROUTER_API_KEY=sk-or-v1-xxxxx' >> $WORKSPACE/.env"
+  echo "⚠️  No API key found. Add one of these to $WORKSPACE/.env:"
+  echo "   LLM_API_KEY=<your-key>             (preferred)"
+  echo "   OPENROUTER_API_KEY=sk-or-v1-xxxxx  (backward-compatible)"
+  echo "   LLM scripts will fail until an API key is configured."
   echo ""
+elif [[ "$LLM_BASE_URL" == "https://openrouter.ai/api/v1" && "$LLM_API_KEY" != sk-or-v1-* ]]; then
+  echo ""
+  echo "⚠️  LLM_BASE_URL points to OpenRouter but key does not start with 'sk-or-v1-'."
+  echo "   Double-check your API key or set LLM_BASE_URL to your actual provider."
+  echo ""
+else
+  echo "✅ API key found (format looks OK)"
 fi
+echo "   Run the observer once to verify your API key works."
 
 # --- Create directories ---
 echo ""
@@ -86,6 +113,15 @@ EOF
   echo "✅ Created observations.md"
 else
   echo "ℹ️  observations.md already exists, keeping it"
+fi
+
+# --- Create default AIE config ---
+mkdir -p "$WORKSPACE/config"
+if [ ! -e "$WORKSPACE/config/aie.yaml" ]; then
+  cp "$SKILL_DIR/config/aie.yaml" "$WORKSPACE/config/aie.yaml"
+  echo "✅ Created config/aie.yaml from template"
+else
+  echo "ℹ️  config/aie.yaml already exists, keeping it"
 fi
 
 # --- Make scripts executable ---

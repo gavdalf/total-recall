@@ -12,7 +12,17 @@ Total Recall v2.0 keeps the existing v1.x stack intact:
 
 It also adds the Ambient Intelligence Engine (AIE): a configurable sensor and rumination pipeline that can watch external systems, think about what changed, maintain a preconscious buffer, and surface urgent items.
 
-Prerequisites: `python3`, `jq`, `curl`, and `pip install pyyaml`.
+Prerequisites: `python3`, `jq`, `curl`, and `PyYAML`.
+
+Install PyYAML with:
+
+```bash
+python3 -m pip install PyYAML
+# or on Debian/Ubuntu:
+sudo apt install python3-yaml
+```
+
+`setup.sh` will verify all dependencies are present before continuing.
 
 ## Architecture
 

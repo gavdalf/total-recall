@@ -13,6 +13,10 @@ source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
 
+# Normalize LLM provider vars (LLM_API_KEY preferred; OPENROUTER_API_KEY backward-compatible)
+LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
+LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
+
 WORKSPACE="$AIE_WORKSPACE"
 BUS="$(aie_get "paths.events_bus" "$WORKSPACE/memory/events/bus.jsonl")"
 BUS_LOCK="${BUS}.lock"
@@ -278,7 +282,6 @@ log "Calling LLM (model: $RUMINATION_MODEL)..."
 # ─── LLM call ────────────────────────────────────────────────────────────────
 # Determine API auth method
 AUTH_HEADER=""
-API_URL="https://openrouter.ai/api/v1/chat/completions"
 MODEL="$RUMINATION_MODEL"
 
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
@@ -289,11 +292,12 @@ elif [[ -n "${CLAUDE_ACCESS_TOKEN:-}" ]]; then
   AUTH_HEADER="Authorization: Bearer $CLAUDE_ACCESS_TOKEN"
   API_URL="https://api.anthropic.com/v1/messages"
   USE_ANTHROPIC=true
-elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-  AUTH_HEADER="Authorization: Bearer $OPENROUTER_API_KEY"
+elif [[ -n "${LLM_API_KEY:-}" ]]; then
+  AUTH_HEADER="Authorization: Bearer $LLM_API_KEY"
+  API_URL="${LLM_BASE_URL%/}/chat/completions"
   USE_ANTHROPIC=false
 else
-  log "ERROR: No API key found (ANTHROPIC_API_KEY, CLAUDE_ACCESS_TOKEN, or OPENROUTER_API_KEY)"
+  log "ERROR: No API key found. Set LLM_API_KEY (or OPENROUTER_API_KEY) in your .env file."
   exit 1
 fi
 
@@ -360,7 +364,18 @@ else
   BODY=$(echo "$HTTP_RESP" | sed 's/__STATUS__:.*//')
 
   if [[ "$HTTP_STATUS" != "200" ]]; then
-    log "ERROR: OpenRouter API returned status $HTTP_STATUS: $(echo "$BODY" | head -c 300)"
+    case "$HTTP_STATUS" in
+      401|403)
+        log "ERROR: API returned $HTTP_STATUS — invalid or unauthorized API key. Check LLM_API_KEY / OPENROUTER_API_KEY in your .env." ;;
+      402)
+        log "ERROR: API returned 402 — payment required. If using OpenRouter, check your credit balance at https://openrouter.ai/settings/credits" ;;
+      429)
+        log "ERROR: API returned 429 — rate limit exceeded. Consider increasing COOLDOWN_SECONDS or trying later." ;;
+      5*)
+        log "ERROR: API returned $HTTP_STATUS — provider outage or transient failure. Try again later. Body: $(echo "$BODY" | head -c 200)" ;;
+      *)
+        log "ERROR: API returned status $HTTP_STATUS: $(echo "$BODY" | head -c 300)" ;;
+    esac
     exit 1
   fi
 
