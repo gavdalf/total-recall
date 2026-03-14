@@ -2,6 +2,49 @@
 
 All notable changes to Total Recall are documented here.
 
+## [2.2.0] - 2026-03-14
+
+### Changed: Dream Cycle Performance Split
+
+**The problem:** The Dream Cycle nightly job had accumulated features over 3 weeks of Phase 2 development (decay, type classification, confidence scoring, chunking, 4-5 semantic hooks per item, and 7-day pattern scanning). Each feature was individually justified, but together they pushed run times from ~5 minutes to 13+ minutes. Two consecutive nights hit the 900-second timeout and produced no output at all. That's worse than any individual feature being slightly less thorough.
+
+**The fix:** Split the Dream Cycle into two jobs and trim the fat.
+
+#### Nightly core job (02:30, every night)
+Runs decay, classification, confidence scoring, chunking, archiving, and semantic hooks. Everything that directly maintains `observations.md` health.
+
+- **Hooks reduced from 4-5 to 2-3 per archived item.** The 4th and 5th hooks were always the weakest associations ("audio delivery system failure" instead of "TTS timeout"). The top 2-3 cover 95%+ of realistic search queries. This alone cuts ~30% of output tokens.
+- **Classification made concise.** The agent was writing paragraph justifications for each observation's type and confidence score. Nothing ever read those justifications. Now it just assigns the values.
+- **WP4 pattern scanning removed from nightly run.** This was the biggest time sink: loading 7 separate dream log files and cross-referencing every theme across all of them.
+
+#### Weekly pattern job (03:00, Sundays)
+WP4 pattern promotion now runs once a week. Same logic, same thresholds, same output. Reads 7 days of dream logs, scans for recurring themes across 3+ calendar days, writes proposals to `memory/dream-staging/`.
+
+Running this weekly instead of nightly means a qualifying pattern detected on Wednesday won't be surfaced until Sunday. In practice this doesn't matter: staging proposals sit until human review anyway. Nobody was actioning them the morning after.
+
+#### Quality impact
+- **Archiving decisions: identical.** Same scoring rubric, same age thresholds, same future-date protection.
+- **Validation gates: identical.** Same three gates (zero false archives, token target, reduction percentage).
+- **Memory integrity: identical.** Same observations get archived, same hooks get written, same chunks get created.
+- **Search recall: marginal reduction.** 2-3 hooks instead of 4-5 means ~5-10% less coverage on unusual search queries for archived observations. Acceptable tradeoff.
+- **Pattern detection: delayed, not degraded.** Weekly instead of nightly. Same algorithm, same confidence levels, same human approval requirement.
+
+#### Expected performance
+- Nightly core job: estimated ~400s (down from 800s+), well within the 900s timeout
+- Weekly pattern job: ~300-500s on its own, plenty of headroom
+
+#### Production context
+- 3 weeks of Phase 2 live data: 21 successful runs, ~50% average token reduction, zero false archives across all runs
+- The timeout failures were the trigger: two consecutive nights of zero output is worse than slightly fewer semantic hooks
+
+### Results (3 weeks production data, pre-split)
+
+| Period | Avg Tokens Before | Avg Tokens After | Avg Reduction | False Archives |
+|--------|------------------|-----------------|---------------|----------------|
+| Week 1 (Phase 2 launch) | 8,349 | 3,622 | 57% | 0 |
+| Week 2 | 9,330 | 3,290 | 58% | 0 |
+| Week 3 | 6,242 | 2,973 | 48% | 0 |
+
 ## [2.1.0] - 2026-03-07
 
 ### Changed
