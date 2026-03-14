@@ -16,7 +16,7 @@ LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
 
-OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
+REFLECTOR_MODEL="${REFLECTOR_MODEL:-$LLM_MODEL}"
 REFLECTOR_WORD_THRESHOLD="${REFLECTOR_WORD_THRESHOLD:-8000}"
 
 OBSERVATIONS_FILE="$MEMORY_DIR/observations.md"
@@ -29,7 +29,7 @@ LOCK_FILE="$WORKSPACE/logs/reflector.lock"
 if [ -f "$WORKSPACE/.env" ]; then
   set -a
   # Load provider config + backward compatible OPENROUTER key
-  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY)=' "$WORKSPACE/.env" 2>/dev/null)" || true
+  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY|OBSERVER_MODEL|REFLECTOR_MODEL)=' "$WORKSPACE/.env" 2>/dev/null)" || true
   set +a
 fi
 
@@ -37,7 +37,7 @@ fi
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
-OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
+REFLECTOR_MODEL="${REFLECTOR_MODEL:-$LLM_MODEL}"
 
 mkdir -p "$WORKSPACE/logs" "$BACKUP_DIR"
 
@@ -96,7 +96,7 @@ TODAY=$(date '+%Y-%m-%d')
 PAYLOAD=$(jq -n \
   --arg system "$SYSTEM_PROMPT" \
   --arg obs "Today is $TODAY. Here is the current observation log to consolidate:\n\n$CURRENT_OBS" \
-  --arg model "$OBSERVER_MODEL" \
+  --arg model "$REFLECTOR_MODEL" \
   '{
     model: $model,
     messages: [
@@ -114,7 +114,7 @@ for ATTEMPT in 1 2; do
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" 2>/dev/null)
 
-  REFLECTED=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+  REFLECTED=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' 2>/dev/null)
   [ -n "$REFLECTED" ] && break
 
   ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty' 2>/dev/null)
