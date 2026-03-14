@@ -159,8 +159,8 @@ portable_flock() {
     _prev_term_cmd=$(trap -p TERM | sed "s/^trap -- '//;s/' TERM$//" 2>/dev/null)
     trap "rm -rf \"$lock_dir\"; ${_prev_int_cmd:-:}; exit 130" INT
     trap "rm -rf \"$lock_dir\"; ${_prev_term_cmd:-:}; exit 143" TERM
-    "$@"
-    local rc=$?
+    local rc=0
+    "$@" || rc=$?
     # Restore original traps
     if [[ -n "$_prev_int_cmd" ]]; then eval "trap -- '$_prev_int_cmd' INT"; else trap - INT; fi
     if [[ -n "$_prev_term_cmd" ]]; then eval "trap -- '$_prev_term_cmd' TERM"; else trap - TERM; fi
@@ -213,9 +213,16 @@ bus_append() {
       sleep 0.1
     done
     echo $$ > "${lock_dir}/pid" 2>/dev/null
-    trap "rm -rf \"$lock_dir\"" INT TERM
+    # Save existing signal traps before overwriting
+    local _prev_int_cmd _prev_term_cmd
+    _prev_int_cmd=$(trap -p INT | sed "s/^trap -- '//;s/' INT$//" 2>/dev/null)
+    _prev_term_cmd=$(trap -p TERM | sed "s/^trap -- '//;s/' TERM$//" 2>/dev/null)
+    trap "rm -rf \"$lock_dir\"; ${_prev_int_cmd:-:}; exit 130" INT
+    trap "rm -rf \"$lock_dir\"; ${_prev_term_cmd:-:}; exit 143" TERM
     printf '%s\n' "$data" >> "$target"
-    trap - INT TERM
+    # Restore original traps
+    if [[ -n "$_prev_int_cmd" ]]; then eval "trap -- '$_prev_int_cmd' INT"; else trap - INT; fi
+    if [[ -n "$_prev_term_cmd" ]]; then eval "trap -- '$_prev_term_cmd' TERM"; else trap - TERM; fi
     rm -rf "$lock_dir"
   fi
 }
@@ -227,7 +234,11 @@ try_lock() {
   local lockfile="$1" fd="${2:-9}"
   if command -v flock &>/dev/null; then
     eval "exec ${fd}>\"${lockfile}\""
-    flock -n "$fd" 2>/dev/null
+    if ! flock -n "$fd" 2>/dev/null; then
+      # Lock held by another process — close fd and report failure
+      eval "exec ${fd}>&-" 2>/dev/null
+      return 1
+    fi
     # Store fd so release_lock can close it
     _OPENCLAW_LOCK_FD="$fd"
   else
