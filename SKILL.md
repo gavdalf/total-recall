@@ -96,13 +96,14 @@ All scripts read from environment variables with sensible defaults:
 | `OPENROUTER_API_KEY` | (required) | OpenRouter API key for LLM calls |
 | `MEMORY_DIR` | `$OPENCLAW_WORKSPACE/memory` | Where observations.md lives |
 | `SESSIONS_DIR` | `~/.openclaw/agents/main/sessions` | OpenClaw session transcripts |
-| `OBSERVER_MODEL` | `deepseek/deepseek-v3.2` | Primary model for compression |
-| `OBSERVER_FALLBACK_MODEL` | `google/gemini-2.5-flash` | Fallback if primary fails |
+| `OBSERVER_MODEL` | `stepfun/step-3.5-flash` | Primary model for compression (free) |
+| `OBSERVER_FALLBACK_MODEL` | `nvidia/nemotron-3-nano-30b-a3b:free` | Fallback if primary fails (free) |
 | `OBSERVER_LOOKBACK_MIN` | `15` | Minutes to look back (daytime) |
 | `OBSERVER_MORNING_LOOKBACK_MIN` | `480` | Minutes to look back (before 8am) |
 | `OBSERVER_LINE_THRESHOLD` | `40` | Lines before reactive trigger (Linux) |
 | `OBSERVER_COOLDOWN_SECS` | `300` | Cooldown between reactive triggers (Linux) |
 | `REFLECTOR_WORD_THRESHOLD` | `8000` | Words before reflector runs |
+| `REFLECTOR_MODEL` | `nvidia/nemotron-3-super-120b-a12b:free` | Model for consolidating observations (free) |
 | `OPENCLAW_WORKSPACE` | `~/your-workspace` | Workspace root |
 
 ## LLM Provider Configuration
@@ -173,9 +174,14 @@ journalctl --user -u total-recall-watcher -f
 
 ## Cost
 
-Using DeepSeek v3.2 via OpenRouter:
-- ~$0.03-0.10/month for typical usage (observer + reflector)
+Using the default free models via OpenRouter:
+- ~$0.00/month for typical usage (observer + reflector)
 - ~15-30 cron runs/day, each processing a few hundred tokens
+- All default models are free tier models
+
+## Model Notes
+
+The default models (`stepfun/step-3.5-flash` and `nvidia/nemotron-3-super-120b-a12b:free`) are reasoning models that return content in the reasoning field rather than the content field. The scripts automatically handle this difference.
 
 ## How It Works (Technical)
 
