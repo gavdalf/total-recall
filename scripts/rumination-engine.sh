@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
+source "$SCRIPT_DIR/aie-tools.sh"
 
 # Normalize LLM provider vars (LLM_API_KEY preferred; OPENROUTER_API_KEY backward-compatible)
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
@@ -391,59 +392,7 @@ if [[ -z "$LLM_TEXT" ]]; then
   exit 1
 fi
 
-# ─── Robust JSON extraction ──────────────────────────────────────────────────
-# Strategy: try multiple extraction methods before falling back to rescue mode
-
-extract_json() {
-  local raw="$1"
-  local result=""
-
-  # Method 1: Direct parse (cleanest case)
-  result=$(echo "$raw" | jq -c '.' 2>/dev/null)
-  if [[ -n "$result" ]]; then echo "$result"; return 0; fi
-
-  # Method 2: Strip markdown code fences (```json ... ```)
-  local stripped
-  stripped=$(echo "$raw" | sed -n '/^```json/,/^```$/p' | sed '1d;$d')
-  if [[ -n "$stripped" ]]; then
-    result=$(echo "$stripped" | jq -c '.' 2>/dev/null)
-    if [[ -n "$result" ]]; then echo "$result"; return 0; fi
-  fi
-
-  # Method 3: Strip any ``` fences (without json tag)
-  stripped=$(echo "$raw" | sed -n '/^```/,/^```$/p' | sed '1d;$d')
-  if [[ -n "$stripped" ]]; then
-    result=$(echo "$stripped" | jq -c '.' 2>/dev/null)
-    if [[ -n "$result" ]]; then echo "$result"; return 0; fi
-  fi
-
-  # Method 4: Find first { to last } (greedy brace extraction)
-  stripped=$(echo "$raw" | sed -n '/{/,/^}/p')
-  if [[ -n "$stripped" ]]; then
-    result=$(echo "$stripped" | jq -c '.' 2>/dev/null)
-    if [[ -n "$result" ]]; then echo "$result"; return 0; fi
-  fi
-
-  # Method 5: python3 regex extraction as last resort
-  if command -v python3 &>/dev/null; then
-    result=$(python3 -c "
-import re, json, sys
-raw = sys.stdin.read()
-# Find the outermost JSON object
-match = re.search(r'\{.*\}', raw, re.DOTALL)
-if match:
-    try:
-        obj = json.loads(match.group())
-        print(json.dumps(obj))
-    except json.JSONDecodeError:
-        pass
-" <<< "$raw" 2>/dev/null)
-    if [[ -n "$result" ]]; then echo "$result"; return 0; fi
-  fi
-
-  return 1
-}
-
+# ─── Parse JSON from LLM response (uses extract_json from aie-tools.sh) ──────
 LLM_JSON=$(extract_json "$LLM_TEXT")
 PARSE_OK=$?
 
@@ -472,6 +421,296 @@ if [[ "$HAS_NOTES" != "true" || "$HAS_MONO" != "true" ]]; then
   }' 2>/dev/null || echo '{"rumination_notes":[],"monologue_fragment":"Total parse failure."}')
 fi
 
+# ─── Extract core fields from validated LLM JSON ─────────────────────────────
+RUMINATION_NOTES=$(echo "$LLM_JSON" | jq -c '.rumination_notes // []' 2>/dev/null || echo "[]")
+MONOLOGUE=$(echo "$LLM_JSON" | jq -r '.monologue_fragment // ""' 2>/dev/null || echo "")
+
+# ─── Cycle State (Working Memory) ────────────────────────────────────────────
+CYCLE_STATE_FILE="$RUMINATION_DIR/cycle-state.json"
+CYCLE_STATE_DEFAULT='{"version":1,"last_updated":"","lookups":[],"ttl_hours":4,"max_entries":50}'
+
+if [[ -f "$CYCLE_STATE_FILE" ]]; then
+  CYCLE_STATE=$(jq -c '.' "$CYCLE_STATE_FILE" 2>/dev/null || echo "$CYCLE_STATE_DEFAULT")
+else
+  CYCLE_STATE="$CYCLE_STATE_DEFAULT"
+fi
+
+# Prune entries older than ttl_hours
+CYCLE_TTL_HOURS=$(echo "$CYCLE_STATE" | jq -r '.ttl_hours // 4' 2>/dev/null || echo 4)
+CYCLE_STATE=$(echo "$CYCLE_STATE" | jq -c \
+  --arg now "$NOW" \
+  --argjson ttl "$CYCLE_TTL_HOURS" '
+  .lookups = [
+    .lookups[] |
+    select(
+      (now - (.timestamp | if . == "" then 0 else (try (strptime("%Y-%m-%dT%H:%M:%SZ") | mktime) catch 0) end)) < ($ttl * 3600)
+    )
+  ]
+' 2>/dev/null || echo "$CYCLE_STATE")
+log "Cycle state loaded ($(echo "$CYCLE_STATE" | jq '.lookups | length' 2>/dev/null || echo 0) cached entries, ttl=${CYCLE_TTL_HOURS}h)"
+
+# ─── Insight Classification (moved from ambient-actions) ─────────────────────
+CANDIDATE_ACTIONS="[]"
+ALLOWED_TOOLS="calendar_lookup gmail_search gmail_read ionos_search todoist_query weather fitbit_data github_status openrouter_balance web_search places_lookup"
+
+NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
+
+CLASS_PROMPT=$(cat << 'CLASS_EOF'
+You are the classification layer of an AI assistant. Given a set of rumination insights, decide which (if any) real-time lookups would meaningfully enrich them.
+
+## Available tools
+- calendar_lookup: query="search term" — upcoming events, schedule conflicts
+- gmail_search: query="search terms" — search primary Gmail inbox (kyloe18@googlemail.com)
+- gmail_read: query="message_id" — read a specific Gmail message body
+- ionos_search: query="search terms" — search secondary IONOS email account (work/external)
+- todoist_query: query="filter" — check tasks/todos
+- weather: query="location or empty" — current weather conditions
+- fitbit_data: query="" — health metrics (sleep, steps, heart rate, weight)
+- github_status: query="" — GitHub notifications and repo activity
+- openrouter_balance: query="" — check AI API credit balance
+- web_search: query="search terms" — live web search for breaking news or facts
+- places_lookup: query="place type or name" — nearby places of interest
+
+## Rules
+1. Only recommend lookups that would DIRECTLY enrich one of the insights listed below.
+2. Maximum 5 lookups total. Prefer quality over quantity.
+3. EMAIL ACCOUNTS — CRITICAL: There are TWO email accounts:
+   - gmail_search/gmail_read = personal Gmail (kyloe18@googlemail.com) — personal correspondence, receipts, notifications
+   - ionos_search = work/professional IONOS account — client emails, invoices, professional contacts
+   Use the correct account. When in doubt about which account an email thread lives in, check BOTH.
+4. ATTRIBUTION: All sensor data belongs to the primary user unless there is explicit evidence otherwise.
+5. If no lookup would genuinely help, return an empty actions array.
+6. Each action must have: tool (string), query (string), reason (string, max 60 chars), importance (float 0-1)
+
+Respond with ONLY valid JSON:
+{"actions": [{"tool": "...", "query": "...", "reason": "...", "importance": 0.7}]}
+CLASS_EOF
+)
+
+# Append the actual insights
+CLASS_PROMPT="${CLASS_PROMPT}
+
+## Insights to classify
+${NOTES_FOR_CLASS:-No insights available.}
+"
+
+log "Running classification (model: $CLASSIFICATION_MODEL)..."
+CLASS_RAW=$(call_openrouter "$CLASS_PROMPT" 900 0.2 "Rumination Classification" "$CLASSIFICATION_MODEL" 2>/dev/null || echo "")
+CLASS_TOKENS="$TOKENS_USED"
+
+if [[ -n "$CLASS_RAW" ]]; then
+  CLASS_JSON=$(extract_json "$CLASS_RAW" 2>/dev/null || echo "")
+  if [[ -n "$CLASS_JSON" ]]; then
+    # Filter to only ALLOWED_TOOLS
+    CANDIDATE_ACTIONS=$(echo "$CLASS_JSON" | jq -c \
+      --arg allowed "$ALLOWED_TOOLS" \
+      '.actions // [] | map(select(.tool as $t | ($allowed | split(" ")) | any(. == $t)))' \
+      2>/dev/null || echo "[]")
+    ACTION_COUNT=$(echo "$CANDIDATE_ACTIONS" | jq 'length' 2>/dev/null || echo 0)
+    log "Classification complete: $ACTION_COUNT candidate actions (tokens: $CLASS_TOKENS)"
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "=== CLASSIFICATION RESULT ===" >&2
+      echo "$CANDIDATE_ACTIONS" | jq '.' >&2
+    fi
+  else
+    log "WARN: Classification returned unparseable JSON — continuing with no actions"
+  fi
+else
+  log "WARN: Classification call failed — continuing with no actions"
+fi
+
+# Prune to MAX_ACTIONS
+CANDIDATE_ACTIONS=$(echo "$CANDIDATE_ACTIONS" | jq -c \
+  --argjson max "${MAX_ACTIONS:-5}" \
+  'sort_by(-.importance) | .[0:$max]' 2>/dev/null || echo "[]")
+
+# ─── Execute Lookups (with cycle-state dedup) ─────────────────────────────────
+ACTION_RESULTS="[]"
+LOOKUP_ENTRIES="[]"
+BUDGET_START=$(date +%s)
+BUDGET_REMAINING="${ACTION_BUDGET_SECONDS:-60}"
+
+CANDIDATE_COUNT=$(echo "$CANDIDATE_ACTIONS" | jq 'length' 2>/dev/null || echo 0)
+log "Executing $CANDIDATE_COUNT lookups (budget: ${BUDGET_REMAINING}s)"
+
+for i in $(seq 0 $((CANDIDATE_COUNT - 1))); do
+  # Check time budget
+  BUDGET_NOW=$(date +%s)
+  ELAPSED_BUDGET=$(( BUDGET_NOW - BUDGET_START ))
+  BUDGET_REMAINING=$(( ACTION_BUDGET_SECONDS - ELAPSED_BUDGET ))
+  if [[ $BUDGET_REMAINING -le 0 ]]; then
+    log "Budget exhausted after $ELAPSED_BUDGET s — stopping lookups"
+    break
+  fi
+
+  ACTION=$(echo "$CANDIDATE_ACTIONS" | jq -c ".[$i]" 2>/dev/null || continue)
+  TOOL=$(echo "$ACTION" | jq -r '.tool // ""' 2>/dev/null)
+  QUERY=$(echo "$ACTION" | jq -r '.query // ""' 2>/dev/null)
+  REASON=$(echo "$ACTION" | jq -r '.reason // ""' 2>/dev/null)
+  IMPORTANCE=$(echo "$ACTION" | jq -r '.importance // 0.5' 2>/dev/null)
+  LOOKUP_KEY="${TOOL}:${QUERY}"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY RUN] Would execute: $TOOL (query='$QUERY', reason='$REASON')" >&2
+    continue
+  fi
+
+  # Check cycle-state for previous result
+  PREV_ENTRY=$(echo "$CYCLE_STATE" | jq -c \
+    --arg key "$LOOKUP_KEY" \
+    --argjson ttl "$CYCLE_TTL_HOURS" \
+    '.lookups[] | select(.tool + ":" + .query == $key) | select(
+      (now - (.timestamp | if . == "" then 0 else (try (strptime("%Y-%m-%dT%H:%M:%SZ") | mktime) catch 0) end)) < ($ttl * 3600)
+    )' 2>/dev/null | head -1 || echo "")
+
+  log "Lookup $((i+1))/$CANDIDATE_COUNT: $TOOL (query='${QUERY:0:50}')..."
+
+  # Execute the tool (returns JSON: {"status":"ok","output":"..."} or {"status":"error",...})
+  RESULT_JSON=$(run_tool "$TOOL" "$QUERY" "$BUDGET_REMAINING" 2>/dev/null || echo '{"status":"error","error":"run_tool_failed"}')
+  RESULT_STATUS=$(echo "$RESULT_JSON" | jq -r '.status // "error"' 2>/dev/null || echo "error")
+  RESULT_OUTPUT=$(echo "$RESULT_JSON" | jq -r '.output // ""' 2>/dev/null || echo "")
+  RESULT_HASH=$(echo "$RESULT_OUTPUT" | head -c 500 | md5sum | cut -d' ' -f1)
+  STATUS="new"
+
+  if [[ -n "$PREV_ENTRY" ]]; then
+    PREV_HASH=$(echo "$PREV_ENTRY" | jq -r '.result_hash // ""' 2>/dev/null)
+    PREV_TS=$(echo "$PREV_ENTRY" | jq -r '.timestamp // ""' 2>/dev/null)
+    if [[ "$RESULT_HASH" == "$PREV_HASH" ]]; then
+      log "  → unchanged since $PREV_TS (hash match)"
+      STATUS="unchanged"
+    else
+      log "  → CHANGED since $PREV_TS (hash differs)"
+      STATUS="changed"
+      IMPORTANCE=$(echo "$IMPORTANCE + 0.1" | bc 2>/dev/null || echo "$IMPORTANCE")
+      # Cap at 1.0
+      IMPORTANCE=$(echo "$IMPORTANCE" | awk '{if ($1 > 1.0) print 1.0; else print $1}')
+    fi
+  fi
+
+  RESULT_SUMMARY=$(echo "$RESULT_OUTPUT" | head -c 100 | tr '\n' ' ')
+  log "  → status=$STATUS tool_status=$RESULT_STATUS result='${RESULT_SUMMARY:0:80}...'"
+
+  # Build action result entry (only if tool returned useful output)
+  if [[ "$RESULT_STATUS" == "ok" && -n "$RESULT_OUTPUT" ]]; then
+    RESULT_ENTRY=$(jq -cn \
+      --arg tool "$TOOL" \
+      --arg query "$QUERY" \
+      --arg reason "$REASON" \
+      --arg result "$RESULT_OUTPUT" \
+      --arg status "$STATUS" \
+      --argjson importance "$IMPORTANCE" \
+      '{tool:$tool, query:$query, reason:$reason, result:$result, status:$status, importance:$importance}')
+    ACTION_RESULTS=$(echo "$ACTION_RESULTS" | jq -c \
+      --argjson entry "$RESULT_ENTRY" '. + [$entry]' 2>/dev/null || echo "$ACTION_RESULTS")
+  fi
+
+  # Build cycle-state lookup entry
+  LOOKUP_ENTRY=$(jq -cn \
+    --arg tool "$TOOL" \
+    --arg query "$QUERY" \
+    --arg hash "$RESULT_HASH" \
+    --arg summary "$RESULT_SUMMARY" \
+    --arg ts "$NOW" \
+    --arg status "$STATUS" \
+    '{tool:$tool, query:$query, result_hash:$hash, result_summary:$summary, timestamp:$ts, status:$status}')
+  LOOKUP_ENTRIES=$(echo "$LOOKUP_ENTRIES" | jq -c \
+    --argjson entry "$LOOKUP_ENTRY" '. + [$entry]' 2>/dev/null || echo "$LOOKUP_ENTRIES")
+done
+
+EXEC_COUNT=$(echo "$ACTION_RESULTS" | jq 'length' 2>/dev/null || echo 0)
+log "Lookup execution complete: $EXEC_COUNT results collected"
+
+# ─── Insight Enrichment ───────────────────────────────────────────────────────
+if [[ "$DRY_RUN" != "true" && "$EXEC_COUNT" -gt 0 ]]; then
+  RESULTS_SUMMARY=$(echo "$ACTION_RESULTS" | jq -r \
+    '.[] | "[\(.tool)] query=\(.query)\nResult: \(.result | .[0:400])\nStatus: \(.status)\n"' \
+    2>/dev/null | head -60 || echo "")
+
+  ENRICH_PROMPT=$(cat << 'ENRICH_EOF'
+You are the enrichment layer of an AI assistant. You have rumination insights from an earlier thinking pass, plus fresh real-time data from lookups. Your task is to ENRICH the insights with the new data — not to rewrite them wholesale.
+
+Rules:
+1. Update insights where the lookup data directly confirms, refutes, or adds specificity.
+2. Add NEW insights only if the lookup data reveals something genuinely important that wasn't in the original notes.
+3. Keep the same JSON structure as the input: array of objects with thread, content, importance, expires, tags fields.
+4. Do NOT increase total insight count by more than 3.
+5. Importance scores should only increase if the lookup confirmed urgency or revealed a new risk.
+6. If lookup results don't improve any insight, return the original notes unchanged.
+
+Respond with ONLY valid JSON:
+{"rumination_notes": [...enriched notes array...]}
+ENRICH_EOF
+)
+
+  ENRICH_PROMPT="${ENRICH_PROMPT}
+
+## Original rumination notes
+$(echo "$RUMINATION_NOTES" | jq '.' 2>/dev/null)
+
+## Real-time lookup results
+${RESULTS_SUMMARY}
+"
+
+  log "Running enrichment (model: $ENRICHMENT_MODEL)..."
+  ENRICH_RAW=$(call_openrouter "$ENRICH_PROMPT" 1200 0.2 "Rumination Enrichment" "$ENRICHMENT_MODEL" 2>/dev/null || echo "")
+  ENRICH_TOKENS="$TOKENS_USED"
+
+  if [[ -n "$ENRICH_RAW" ]]; then
+    ENRICH_JSON=$(extract_json "$ENRICH_RAW" 2>/dev/null || echo "")
+    if [[ -n "$ENRICH_JSON" ]]; then
+      ENRICHED_NOTES=$(echo "$ENRICH_JSON" | jq -c '.rumination_notes // empty' 2>/dev/null || echo "")
+      if [[ -n "$ENRICHED_NOTES" ]]; then
+        RUMINATION_NOTES="$ENRICHED_NOTES"
+        log "Enrichment applied (tokens: $ENRICH_TOKENS, notes updated)"
+      else
+        log "WARN: Enrichment JSON missing rumination_notes — keeping originals"
+      fi
+    else
+      log "WARN: Enrichment returned unparseable JSON — keeping originals"
+    fi
+  else
+    log "WARN: Enrichment call failed — keeping originals"
+  fi
+elif [[ "$DRY_RUN" == "true" && "$CANDIDATE_COUNT" -gt 0 ]]; then
+  echo "[DRY RUN] Would run enrichment with $CANDIDATE_COUNT candidate lookups" >&2
+else
+  log "Enrichment skipped (no executed lookup results)"
+fi
+
+# ─── Update Cycle State ───────────────────────────────────────────────────────
+if [[ "$DRY_RUN" != "true" ]]; then
+  NEW_LOOKUP_COUNT=$(echo "$LOOKUP_ENTRIES" | jq 'length' 2>/dev/null || echo 0)
+  if [[ "$NEW_LOOKUP_COUNT" -gt 0 ]]; then
+    # Merge: keep existing non-expired entries + new ones, dedup by tool:query (newest wins)
+    MERGED_STATE=$(echo "$CYCLE_STATE" | jq -c \
+      --argjson new_entries "$LOOKUP_ENTRIES" \
+      --arg now "$NOW" \
+      --argjson max_entries "$(echo "$CYCLE_STATE" | jq -r '.max_entries // 50')" \
+      '
+      (.lookups + $new_entries) |
+      group_by(.tool + ":" + .query) |
+      map(sort_by(.timestamp) | last) |
+      sort_by(.timestamp) | reverse |
+      .[0:$max_entries]
+      ' 2>/dev/null || echo "[]")
+
+    NEW_CYCLE_STATE=$(jq -cn \
+      --argjson lookups "$MERGED_STATE" \
+      --arg now "$NOW" \
+      --argjson version "$(echo "$CYCLE_STATE" | jq '.version // 1')" \
+      --argjson ttl "$(echo "$CYCLE_STATE" | jq '.ttl_hours // 4')" \
+      --argjson max "$(echo "$CYCLE_STATE" | jq '.max_entries // 50')" \
+      '{version:$version, last_updated:$now, lookups:$lookups, ttl_hours:$ttl, max_entries:$max}')
+
+    TMP_CS=$(mktemp "${CYCLE_STATE_FILE}.tmp.XXXXXX")
+    echo "$NEW_CYCLE_STATE" > "$TMP_CS"
+    mv "$TMP_CS" "$CYCLE_STATE_FILE"
+    log "Cycle state written: $(echo "$MERGED_STATE" | jq 'length' 2>/dev/null || echo 0) entries → $CYCLE_STATE_FILE"
+  else
+    log "Cycle state not updated (no new lookups executed)"
+  fi
+fi
+
 # ─── Build output record ─────────────────────────────────────────────────────
 RUN_ID="rum-${NOW//[^0-9]/}-$(od -A n -t x -N 3 /dev/urandom 2>/dev/null | tr -d ' ' | head -c 6 || echo "abc123")"
 
@@ -487,10 +726,6 @@ TIME_CONTEXT=$(jq -cn \
     period: $period,
     upcoming: ($upcoming | split("\n") | map(select(length > 0)))
   }')
-
-# Extract fields from LLM response
-RUMINATION_NOTES=$(echo "$LLM_JSON" | jq -c '.rumination_notes // []' 2>/dev/null || echo "[]")
-MONOLOGUE=$(echo "$LLM_JSON" | jq -r '.monologue_fragment // ""' 2>/dev/null || echo "")
 
 # ─── Write follow-up markers for emotionally significant upcoming events ──────
 # Scan rumination notes for high-importance family/health insights about upcoming events
@@ -649,6 +884,12 @@ else
 
   log "Updated watermark to $NOW"
   log "Rumination complete. Run ID: $RUN_ID | Notes: $(echo "$RUMINATION_NOTES" | jq 'length') | Tokens: $TOKENS_USED"
+
+  # Trigger preconscious selection
+  PRECONSCIOUS_SCRIPT="$SCRIPT_DIR/preconscious-select.sh"
+  if [[ -f "$PRECONSCIOUS_SCRIPT" ]]; then
+    timeout 90 bash "$PRECONSCIOUS_SCRIPT" >> "$LOG" 2>&1 || log "WARN: preconscious-select trigger failed"
+  fi
 fi
 
 log "=== Rumination engine END ==="
