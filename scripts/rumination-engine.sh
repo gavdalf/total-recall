@@ -62,6 +62,8 @@ for i in "$@"; do
 done
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
+mkdir -p "$RUMINATION_DIR" "$(dirname "$LOG")"
+
 log() {
   local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [rumination] $*"
   echo "$msg" >> "$LOG"
@@ -85,8 +87,6 @@ if [[ "$TRIGGER" != "scheduled_morning" && "$TRIGGER" != "scheduled_evening" ]];
 fi
 
 # ─── Collect unprocessed events ──────────────────────────────────────────────
-mkdir -p "$RUMINATION_DIR" "$(dirname "$LOG")"
-
 WATERMARK=$(cat "$WATERMARK_FILE" 2>/dev/null || echo "1970-01-01T00:00:00Z")
 
 # Collect events newer than watermark that are unconsumed
@@ -226,7 +226,7 @@ These are events YOU flagged as emotionally significant before they happened. Th
 
 Think across four cognitive threads. For each thread, generate 1-3 notes only if they're genuinely useful. Skip threads if nothing interesting is happening there.
 
-Then write a brief inner monologue fragment — Max's private stream of consciousness, not a report. Sharp, honest, occasionally dry. The kind of thing you'd think but might not say.
+Then write a brief inner monologue fragment — ${ASSISTANT_NAME}'s private stream of consciousness, not a report. Sharp, honest, occasionally dry. The kind of thing you'd think but might not say.
 
 **CRITICAL RULES:**
 1. ZERO obvious summaries. "${PRIMARY_USER_NAME} has meetings tomorrow" is not an insight. A useful note identifies the non-obvious implication or emotional edge.
@@ -267,13 +267,13 @@ Respond with ONLY valid JSON, no markdown, no explanation:
     },
     {
       "thread": "planning",
-      "content": "what Max should proactively prepare for or surface",
+      "content": "what ${ASSISTANT_NAME} should proactively prepare for or surface",
       "importance": 0.8,
       "expires": "ISO8601",
       "tags": ["family"]
     }
   ],
-  "monologue_fragment": "Max's private inner voice — honest, in-character, 1-3 sentences"
+  "monologue_fragment": "${ASSISTANT_NAME}'s private inner voice — honest, in-character, 1-3 sentences"
 }
 PROMPT_EOF
 )
@@ -352,7 +352,7 @@ else
     -H "Content-Type: application/json" \
     -H "$AUTH_HEADER" \
     -H "HTTP-Referer: $HTTP_REFERER" \
-    -H "X-Title: Max Rumination Engine" \
+    -H "X-Title: ${ASSISTANT_NAME} Rumination Engine" \
     -d "$PAYLOAD" \
     --max-time 60 2>/dev/null || echo "CURL_ERROR")
 
@@ -455,12 +455,12 @@ ALLOWED_TOOLS="calendar_lookup gmail_search gmail_read ionos_search todoist_quer
 
 NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
 
-CLASS_PROMPT=$(cat << 'CLASS_EOF'
+CLASS_PROMPT=$(cat << CLASS_EOF
 You are the classification layer of an AI assistant. Given a set of rumination insights, decide which (if any) real-time lookups would meaningfully enrich them.
 
 ## Available tools
 - calendar_lookup: query="search term" — upcoming events, schedule conflicts
-- gmail_search: query="search terms" — search primary Gmail inbox (kyloe18@googlemail.com)
+- gmail_search: query="search terms" — search primary Gmail inbox (${GMAIL_ACCOUNT:-your-gmail@example.com})
 - gmail_read: query="message_id" — read a specific Gmail message body
 - ionos_search: query="search terms" — search secondary IONOS email account (work/external)
 - todoist_query: query="filter" — check tasks/todos
@@ -475,7 +475,7 @@ You are the classification layer of an AI assistant. Given a set of rumination i
 1. Only recommend lookups that would DIRECTLY enrich one of the insights listed below.
 2. Maximum 5 lookups total. Prefer quality over quantity.
 3. EMAIL ACCOUNTS — CRITICAL: There are TWO email accounts:
-   - gmail_search/gmail_read = personal Gmail (kyloe18@googlemail.com) — personal correspondence, receipts, notifications
+   - gmail_search/gmail_read = personal Gmail (${GMAIL_ACCOUNT:-your-gmail@example.com}) — personal correspondence, receipts, notifications
    - ionos_search = work/professional IONOS account — client emails, invoices, professional contacts
    Use the correct account. When in doubt about which account an email thread lives in, check BOTH.
 4. ATTRIBUTION: All sensor data belongs to the primary user unless there is explicit evidence otherwise.

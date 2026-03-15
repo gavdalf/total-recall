@@ -11,6 +11,7 @@ aie_init
 
 RUMINATION_DIR="$(aie_get "paths.rumination_dir" "$AIE_WORKSPACE/memory/rumination")"
 OUTPUT="$(aie_get "paths.preconscious_buffer" "$AIE_WORKSPACE/memory/preconscious-buffer.md")"
+ASSISTANT_NAME="$(aie_get "profile.assistant_name" "the assistant")"
 LOG="$AIE_LOGS_DIR/rumination.log"
 NOW_EPOCH=$(date -u +%s)
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -53,12 +54,13 @@ if [[ "$NOTE_COUNT" -eq 0 ]]; then
 fi
 
 # Score and select using Python
-BUFFER_CONTENT=$(TMP_NOTES="$TMP_NOTES" NOW_EPOCH="$NOW_EPOCH" python3 << 'PYEOF'
+BUFFER_CONTENT=$(TMP_NOTES="$TMP_NOTES" NOW_EPOCH="$NOW_EPOCH" ASSISTANT_NAME="$ASSISTANT_NAME" python3 << 'PYEOF'
 import json, math, sys, os
 from datetime import datetime, timezone
 
 now_epoch = int(os.environ['NOW_EPOCH'])
 notes_file = os.environ['TMP_NOTES']
+assistant_name = os.environ.get('ASSISTANT_NAME', 'the assistant')
 
 notes = []
 
@@ -133,7 +135,7 @@ lines = [
     '# Preconscious Buffer',
     f'_Updated: {now_str}_',
     '',
-    'What Max has on his mind right now:',
+    f'What {assistant_name} has on their mind right now:',
     ''
 ]
 

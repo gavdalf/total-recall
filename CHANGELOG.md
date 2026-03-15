@@ -2,6 +2,29 @@
 
 All notable changes to Total Recall are documented here.
 
+## [2.3.0] - 2026-03-15
+
+### Added
+- **Shared tool library** (`aie-tools.sh`): Extracted common functions (extract_json, call_openrouter, run_timed_capture, run_tool) into reusable library with guard pattern
+- **Working memory** (`cycle-state.json`): Rumination engine now tracks lookups between cycles with TTL-based dedup (4hr window, md5 hash). Same query + same result = skip; different result = flagged as CHANGED with importance boost
+- **Action resolution engine**: Five action types with guardrails:
+  - `ask` — Surface questions to user via preconscious buffer (max 3/run)
+  - `learn` — Store confirmed facts to learned-facts.json (importance >= 0.7, dedup, max 5/run)
+  - `draft` — Prepare content for user review (importance >= 0.75, max 2/run)
+  - `notify` — Send urgent alerts via emergency-surface (importance >= 0.85, max 2/day, quiet hours respected)
+  - `remind` — Time-based nudges via reminders.jsonl (auto-surfaces when due, max 3/run)
+- **Lookup pipeline in rumination engine**: Classification, tool execution, and enrichment now run inside rumination-engine.sh (moved from ambient-actions.sh)
+- **Follow-up markers**: Emotionally significant events get follow-up markers for next morning check-in
+
+### Changed
+- `rumination-engine.sh` now handles the full think → classify → lookup → enrich pipeline
+- `ambient-actions.sh` refactored to pure action resolution (reads enriched insights, decides actions)
+- Preconscious-select trigger moved from ambient-actions to rumination engine
+
+### Fixed
+- Unbound variable `$NOW_` in draft heredoc (now `${NOW}_`)
+- ANSI color codes from himalaya ionos_search stripped before enrichment
+
 ## [2.2.0] - 2026-03-14
 
 ### Changed: Dream Cycle Performance Split
