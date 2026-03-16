@@ -76,6 +76,12 @@ connectors:
     resting_hr_threshold: 65
     weight_target_lbs: 157
     steps_milestone: 10000
+  linkedin:
+    enabled: true
+    node_name: "Mac Studio"
+    script_path: "/Users/gavinwhittaker/playwright-social/scripts/linkedin-messages.py"
+    max_messages: 10
+    wait_seconds: 25
   filewatch:
     enabled: true
     watch_files:
