@@ -373,6 +373,27 @@ run_tool() {
         run_timed_capture "$effective_timeout" 3000 bash -lc 'node "$0" "$1" 2>/dev/null | head -c 3000' "$WEB_SEARCH_SCRIPT" "$query"
       fi
       ;;
+    linkedin_messages)
+      effective_timeout=$(cap_timeout 10 "$remaining_budget")
+      # Read-only: returns cached LinkedIn messages from Mac Studio's last scrape
+      local _li_cache="/tmp/linkedin-messages.json"
+      # Try to read from Mac Studio via openclaw node invoke
+      local _li_result
+      _li_result=$(timeout "$effective_timeout" openclaw nodes invoke \
+        --node "Mac Studio" \
+        --command system.run \
+        --params "{\"command\": [\"cat\", \"$_li_cache\"]}" \
+        --invoke-timeout 10000 \
+        --timeout 12000 \
+        --json 2>/dev/null || echo '{"error":"node_unreachable"}')
+      local _li_stdout
+      _li_stdout=$(echo "$_li_result" | jq -r '.payload.stdout // .stdout // empty' 2>/dev/null || true)
+      if [[ -n "$_li_stdout" ]] && echo "$_li_stdout" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "{\"status\":\"ok\",\"output\":$(echo "$_li_stdout" | jq -c '.' 2>/dev/null)}"
+      else
+        echo '{"status":"error","error":"linkedin_messages_unavailable"}'
+      fi
+      ;;
     places_lookup)
       effective_timeout=$(cap_timeout 15 "$remaining_budget")
       if [[ "$PLACES_ENABLED" != "true" || "$(aie_get "ambient_actions.tool_settings.places_lookup.enabled" "false")" != "true" ]]; then
