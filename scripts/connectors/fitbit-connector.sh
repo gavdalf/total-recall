@@ -12,6 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 
@@ -53,7 +54,7 @@ emit_event() {
       expires_at: $expires_at, importance: $importance, actionable: false,
       payload: $payload, consumed: false, consumer_watermark: null}')
   if [[ -z "$DRY_RUN" ]]; then
-    ( flock -x 200; echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"
+    portable_flock_exec "$BUS_LOCK" "echo '$event' >> '$BUS'"
     log "Emitted: $type → $id"
   else
     log "[DRY-RUN] Would emit: $type | $(echo "$payload" | jq -c '.')"

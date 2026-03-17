@@ -6,6 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 
@@ -30,7 +31,7 @@ export TMP_NOTES
 trap 'rm -f "$TMP_NOTES"' EXIT
 
 for i in 0 1 2 3 4 5 6; do
-  DAY=$(date -d "-${i} days" +%Y-%m-%d 2>/dev/null || echo "")
+  DAY=$(date_days_offset "-${i}" 2>/dev/null || echo "")
   [[ -z "$DAY" ]] && continue
   FILE="$RUMINATION_DIR/${DAY}.jsonl"
   [[ -f "$FILE" ]] || continue

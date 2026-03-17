@@ -9,6 +9,7 @@ set -uo pipefail
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
@@ -136,7 +137,7 @@ UPCOMING_FROM_BUS=$(echo "$UNPROCESSED_JSON" | jq -r \
   2>/dev/null | head -8 || echo "")
 
 # Also try calendar API for fresh data
-UPCOMING_CAL=$(timeout 10 gapi_calendar_events "primary" --days 2 --json 2>/dev/null | \
+UPCOMING_CAL=$(portable_timeout 10 gapi_calendar_events "primary" --days 2 --json 2>/dev/null | \
   jq -r '.[] | "- \(.summary) at \(.start.dateTime // .start.date)"' 2>/dev/null | head -8 || echo "")
 UPCOMING="${UPCOMING_FROM_BUS:-$UPCOMING_CAL}"
 [[ -z "$UPCOMING" ]] && UPCOMING="None detected"
@@ -159,7 +160,7 @@ EVENTS_SUMMARY=$(echo "$UNPROCESSED_JSON" | jq -r \
 # Last 72h rumination notes for deduplication
 RECENT_NOTES=""
 for i in 0 1 2; do
-  DAY_OFFSET=$(date -d "-${i} days" +%Y-%m-%d 2>/dev/null || echo "")
+  DAY_OFFSET=$(date_days_offset "-${i}" 2>/dev/null || echo "")
   if [[ -n "$DAY_OFFSET" ]]; then
     PREV_RUM="$RUMINATION_DIR/${DAY_OFFSET}.jsonl"
     if [[ -f "$PREV_RUM" ]]; then
@@ -454,7 +455,12 @@ log "Cycle state loaded ($(echo "$CYCLE_STATE" | jq '.lookups | length' 2>/dev/n
 CANDIDATE_ACTIONS="[]"
 ALLOWED_TOOLS="calendar_lookup gmail_search gmail_read ionos_search todoist_query weather fitbit_data github_status openrouter_balance web_search places_lookup"
 
-NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
+jq_check_ascii_upcase
+if [[ "$_jq_has_ascii_upcase" == "yes" ]]; then
+  NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
+else
+  NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | explode | map(if . >= 97 and . <= 122 then . - 32 else . end) | implode)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
+fi
 
 CLASS_PROMPT=$(cat << CLASS_EOF
 You are the classification layer of an AI assistant. Given a set of rumination insights, decide which (if any) real-time lookups would meaningfully enrich them.
@@ -786,7 +792,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
   fi
 
   # ── Step 4: Prune delivered markers older than 30 days ──
-  PRUNE_CUTOFF=$(date -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+  PRUNE_CUTOFF=$(date_days_ago 30 2>/dev/null || echo "")
   if [[ -n "$PRUNE_CUTOFF" && -f "$FOLLOWUPS_FILE" ]]; then
     TMP_PRUNE=$(mktemp "${FOLLOWUPS_FILE}.prune.XXXXXX")
     jq -c --arg cutoff "$PRUNE_CUTOFF" '
@@ -839,7 +845,11 @@ if [[ "$DRY_RUN" == "true" ]]; then
   echo "   $MONOLOGUE"
   echo ""
   echo "📝 Rumination Notes:"
-  echo "$RUMINATION_NOTES" | jq -r '.[] | "   [\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)\n   tags: \(.tags | join(", "))\n   expires: \(.expires // "never")\n"'
+  if [[ "$_jq_has_ascii_upcase" == "yes" ]]; then
+    echo "$RUMINATION_NOTES" | jq -r '.[] | "   [\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)\n   tags: \(.tags | join(", "))\n   expires: \(.expires // "never")\n"'
+  else
+    echo "$RUMINATION_NOTES" | jq -r '.[] | "   [\(.thread | explode | map(if . >= 97 and . <= 122 then . - 32 else . end) | implode)] [importance=\(.importance)] \(.content)\n   tags: \(.tags | join(", "))\n   expires: \(.expires // "never")\n"'
+  fi
   echo "════════════════════════════════════════════════════════════"
   log "Dry run complete. No files written."
 else
@@ -862,14 +872,14 @@ else
     # Build a JSON array of the exact event IDs we processed
     PROCESSED_IDS_JSON=$(echo "$SOURCE_IDS" | tr ',' '\n' | jq -Rn '[inputs | select(length > 0)]')
     TMP_BUS=$(mktemp "${BUS}.tmp.XXXXXX")
-    (
-      flock -x 200
+    _mark_consumed() {
       jq -c \
         --argjson processed_ids "$PROCESSED_IDS_JSON" \
         'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = "'"$RUN_ID"'" else . end' \
         "$BUS" > "$TMP_BUS"
       mv "$TMP_BUS" "$BUS"
-    ) 200>"$BUS_LOCK"
+    }
+    portable_flock_exec "$BUS_LOCK" _mark_consumed
     log "Marked $EVENT_COUNT events as consumed in bus (exact IDs matched)"
   fi
 
@@ -889,7 +899,7 @@ else
   # Trigger preconscious selection
   PRECONSCIOUS_SCRIPT="$SCRIPT_DIR/preconscious-select.sh"
   if [[ -f "$PRECONSCIOUS_SCRIPT" ]]; then
-    timeout 90 bash "$PRECONSCIOUS_SCRIPT" >> "$LOG" 2>&1 || log "WARN: preconscious-select trigger failed"
+    portable_timeout 90 bash "$PRECONSCIOUS_SCRIPT" >> "$LOG" 2>&1 || log "WARN: preconscious-select trigger failed"
   fi
 fi
 

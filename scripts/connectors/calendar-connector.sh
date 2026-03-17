@@ -6,6 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 source "$SCRIPT_DIR/google-api.sh"
@@ -69,7 +70,7 @@ emit_event() {
       importance: $importance, actionable: $actionable,
       payload: $payload, consumed: false, consumer_watermark: null}')
   if [[ -z "$DRY_RUN" ]]; then
-    ( flock -x 200; echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"
+    portable_flock_exec "$BUS_LOCK" "echo '$event' >> '$BUS'"
     log "Emitted: $type → $id"
   else
     log "[DRY-RUN] Would emit: $type | $(echo "$payload" | jq -r '.title // "?"') @ $(echo "$payload" | jq -r '.start // "?"')"
@@ -119,7 +120,7 @@ while IFS= read -r ev; do
   # Hours until event starts
   hours_until=999
   if [[ -n "$ev_start" ]]; then
-    ev_start_epoch=$(date -d "$ev_start" +%s 2>/dev/null || echo 0)
+    ev_start_epoch=$(date_to_epoch "$ev_start")
     if [[ "$ev_start_epoch" -gt 0 ]]; then
       hours_until=$(( (ev_start_epoch - NOW_EPOCH) / 3600 ))
     fi

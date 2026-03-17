@@ -6,6 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 source "$SCRIPT_DIR/google-api.sh"
@@ -42,11 +43,7 @@ log() { echo "[gmail] $*"; }
 run_timeout() {
   local seconds="$1"
   shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --kill-after=5 "${seconds}s" "$@"
-  else
-    "$@"
-  fi
+  portable_timeout --kill-after=5 "$seconds" "$@"
 }
 
 TMP_FILES=()
@@ -168,7 +165,7 @@ emit_event() {
       payload: $payload, consumed: false, consumer_watermark: null}') || return 0
 
   if [[ -z "$DRY_RUN" ]]; then
-    if ! ( flock -w "$LOCK_WAIT_SEC" -x 200 && echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"; then
+    if ! PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$BUS_LOCK" "echo '$event' >> '$BUS'"; then
       log "WARN: Failed to write event to bus (lock or IO error)"
       return 0
     fi
@@ -331,16 +328,12 @@ persist_sender_cache_updates() {
     return 0
   fi
 
-  (
-    flock -w "$LOCK_WAIT_SEC" -x 201 || exit 1
-
-    local current sanitized merged
-    current=$(load_json_object_file "$SENDER_CACHE_FILE")
-    sanitized=$(sanitize_sender_cache "$current" "$SCORING_CACHE_THRESHOLD")
-    merged=$(apply_cache_updates "$sanitized" "$updates_json")
-
-    safe_write_json_atomic "$SENDER_CACHE_FILE" "$merged"
-  ) 201>"$SENDER_CACHE_LOCK"
+  PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$SENDER_CACHE_LOCK" '
+    current=$(load_json_object_file "'"$SENDER_CACHE_FILE"'")
+    sanitized=$(sanitize_sender_cache "$current" "'"$SCORING_CACHE_THRESHOLD"'")
+    merged=$(apply_cache_updates "$sanitized" "'"$updates_json"'")
+    safe_write_json_atomic "'"$SENDER_CACHE_FILE"'" "$merged"
+  '
 }
 
 extract_llm_content_array() {

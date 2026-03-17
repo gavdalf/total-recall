@@ -13,6 +13,7 @@ readonly AIE_TOOLS_SH_LOADED=1
 
 # ─── Bootstrap aie-config if not already loaded ──────────────────────────────
 _AIE_TOOLS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_AIE_TOOLS_SCRIPT_DIR/_compat.sh"
 if [[ -z "${AIE_CONFIG_SH_LOADED:-}" ]]; then
   source "$_AIE_TOOLS_SCRIPT_DIR/aie-config.sh"
   aie_init
@@ -178,7 +179,7 @@ run_timed_capture() {
 
   local start end elapsed status output
   start=$(date +%s)
-  output=$(timeout "$timeout_s" "$@" 2>&1)
+  output=$(portable_timeout "$timeout_s" "$@" 2>&1)
   status=$?
   end=$(date +%s)
   elapsed=$((end - start))
@@ -240,7 +241,7 @@ run_tool() {
         to=$(echo "$query" | awk -F'|' '{print $2}')
       fi
       [[ -z "$from" ]] && from="$(date +%Y-%m-%d)"
-      [[ -z "$to" ]] && to="$(date -d '+2 days' +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d)"
+      [[ -z "$to" ]] && to="$(date_future_days 2 2>/dev/null || date +%Y-%m-%d)"
       if [[ -z "$CALENDAR_ACCOUNT" || -z "$CALENDAR_KEYRING_PASSWORD" ]]; then
         echo '{"status":"error","error":"calendar_lookup_not_configured"}'
       else

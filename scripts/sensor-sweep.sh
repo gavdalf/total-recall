@@ -6,6 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 
@@ -72,16 +73,16 @@ log "New events emitted: $NEW_EVENTS"
 # C2 fix: Prune consumed events older than 48h to prevent unbounded growth
 if [[ -z "$DRY_RUN" ]]; then
   PRUNE_HOURS="$(aie_get "thresholds.sensor_prune_hours" "48")"
-  CUTOFF=$(date -u -d "${PRUNE_HOURS} hours ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+  CUTOFF=$(date_hours_ago "$PRUNE_HOURS" 2>/dev/null || echo "")
   if [[ -n "$CUTOFF" ]]; then
     BUS_LINES_BEFORE=$(wc -l < "$BUS" 2>/dev/null || echo 0)
     TMP_PRUNED=$(mktemp "${BUS}.prune.XXXXXX")
-    (
-      flock -x 200
+    _prune_bus() {
       jq -c --arg cutoff "$CUTOFF" \
         'select(.consumed == false or .timestamp > $cutoff)' \
         "$BUS" > "$TMP_PRUNED" 2>/dev/null && mv "$TMP_PRUNED" "$BUS"
-    ) 200>"$BUS_LOCK"
+    }
+    portable_flock_exec "$BUS_LOCK" _prune_bus
     BUS_LINES_AFTER=$(wc -l < "$BUS" 2>/dev/null || echo 0)
     PRUNED=$((BUS_LINES_BEFORE - BUS_LINES_AFTER))
     [[ $PRUNED -gt 0 ]] && log "Pruned $PRUNED consumed events (> ${PRUNE_HOURS}h old)"
@@ -92,7 +93,7 @@ fi
 if [[ $NEW_EVENTS -gt 0 && -z "$DRY_RUN" ]]; then
   if [[ -f "$SCRIPT_DIR/rumination-engine.sh" ]]; then
     log "Triggering rumination engine (background)..."
-    timeout 120 bash "$SCRIPT_DIR/rumination-engine.sh" &
+    portable_timeout 120 bash "$SCRIPT_DIR/rumination-engine.sh" &
     log "Rumination started (PID=$!)"
   else
     log "SKIP rumination — engine not yet built"
