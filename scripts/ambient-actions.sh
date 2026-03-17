@@ -653,6 +653,71 @@ done
 
 log "Action execution complete: ask=$ASK_COUNT, learn=$LEARN_COUNT, draft=$DRAFT_COUNT, notify=$NOTIFY_COUNT, remind=$REMIND_COUNT"
 
+# ─── Learned facts pruning: TTL + hard cap ────────────────────────────────────
+# Prevents unbounded growth of learned-facts.json over long-running deployments.
+# - Auto-learned facts (source=ambient_actions or source=rumination with auto tag) expire after TTL
+# - Hard cap ensures file never exceeds MAX_TOTAL_FACTS entries
+# - Facts from explicit user input (source=gavin_explicit or similar) are protected from TTL
+
+MAX_TOTAL_FACTS="${AIE_LEARNED_FACTS_MAX:-100}"
+FACT_TTL_DAYS="${AIE_LEARNED_FACTS_TTL_DAYS:-30}"
+
+if [[ -f "$LEARNED_FACTS_FILE" ]] && [[ "$MODE" != "dry_run_actions" ]]; then
+  TOTAL_FACTS=$(jq '.facts | length' "$LEARNED_FACTS_FILE" 2>/dev/null || echo 0)
+
+  if [[ "$TOTAL_FACTS" -gt 0 ]]; then
+    # TTL pruning: remove auto-sourced facts older than FACT_TTL_DAYS
+    # Protected sources (not auto-pruned): any source NOT matching "ambient_actions"
+    CUTOFF_DATE=$(date -u -d "-${FACT_TTL_DAYS} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+                  date -u -v-${FACT_TTL_DAYS}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+                  echo "")
+
+    if [[ -n "$CUTOFF_DATE" ]]; then
+      TMP_PRUNE=$(mktemp)
+      jq --arg cutoff "$CUTOFF_DATE" '
+        .facts |= [.[] | select(
+          .source != "ambient_actions" or
+          (.learned_at // "9999") > $cutoff
+        )]
+      ' "$LEARNED_FACTS_FILE" > "$TMP_PRUNE" 2>/dev/null
+
+      if jq empty "$TMP_PRUNE" 2>/dev/null; then
+        PRUNED_COUNT=$(( TOTAL_FACTS - $(jq '.facts | length' "$TMP_PRUNE" 2>/dev/null || echo "$TOTAL_FACTS") ))
+        if [[ $PRUNED_COUNT -gt 0 ]]; then
+          mv "$TMP_PRUNE" "$LEARNED_FACTS_FILE"
+          log "Pruned $PRUNED_COUNT expired auto-learned facts (older than ${FACT_TTL_DAYS}d)"
+          emit_stage_log "prune_ttl" "$(jq -cn --argjson count "$PRUNED_COUNT" --argjson ttl "$FACT_TTL_DAYS" '{pruned:$count, ttl_days:$ttl}')"
+        else
+          rm -f "$TMP_PRUNE"
+        fi
+      else
+        rm -f "$TMP_PRUNE"
+        log "WARN: TTL prune jq failed, skipping"
+      fi
+    fi
+
+    # Hard cap: if still over MAX_TOTAL_FACTS, drop oldest auto-learned facts
+    TOTAL_FACTS=$(jq '.facts | length' "$LEARNED_FACTS_FILE" 2>/dev/null || echo 0)
+    if [[ "$TOTAL_FACTS" -gt "$MAX_TOTAL_FACTS" ]]; then
+      OVER_BY=$((TOTAL_FACTS - MAX_TOTAL_FACTS))
+      TMP_CAP=$(mktemp)
+      jq --argjson drop "$OVER_BY" '
+        (.facts | map(select(.source == "ambient_actions")) | sort_by(.learned_at) | .[:$drop] | map(.fact)) as $to_remove |
+        .facts |= [.[] | select((.fact as $f | $to_remove | index($f)) == null)]
+      ' "$LEARNED_FACTS_FILE" > "$TMP_CAP" 2>/dev/null
+
+      if jq empty "$TMP_CAP" 2>/dev/null; then
+        mv "$TMP_CAP" "$LEARNED_FACTS_FILE"
+        log "Hard cap: removed $OVER_BY oldest auto-learned facts (max $MAX_TOTAL_FACTS)"
+        emit_stage_log "prune_cap" "$(jq -cn --argjson removed "$OVER_BY" --argjson max "$MAX_TOTAL_FACTS" '{removed:$removed, max_total:$max}')"
+      else
+        rm -f "$TMP_CAP"
+        log "WARN: Hard cap jq failed, skipping"
+      fi
+    fi
+  fi
+fi
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 
 FINAL_SUMMARY=$(jq -cn \
