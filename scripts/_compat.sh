@@ -261,7 +261,7 @@ portable_realpath_m() {
   if realpath -m / &>/dev/null; then
     realpath -m "$1"
   else
-    python3 -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$1" 2>/dev/null || echo "$1"
+    python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$1" 2>/dev/null || echo "$1"
   fi
 }
 

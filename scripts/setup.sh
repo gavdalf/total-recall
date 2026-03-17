@@ -178,6 +178,8 @@ if $_IS_MACOS; then
   <dict>
     <key>OPENCLAW_WORKSPACE</key>
     <string>${WORKSPACE}</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

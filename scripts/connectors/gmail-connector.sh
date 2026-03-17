@@ -329,12 +329,14 @@ persist_sender_cache_updates() {
     return 0
   fi
 
-  PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$SENDER_CACHE_LOCK" '
-    current=$(load_json_object_file "'"$SENDER_CACHE_FILE"'")
-    sanitized=$(sanitize_sender_cache "$current" "'"$SCORING_CACHE_THRESHOLD"'")
-    merged=$(apply_cache_updates "$sanitized" "'"$updates_json"'")
-    safe_write_json_atomic "'"$SENDER_CACHE_FILE"'" "$merged"
-  '
+  _persist_cache() {
+    local current sanitized merged
+    current=$(load_json_object_file "$SENDER_CACHE_FILE")
+    sanitized=$(sanitize_sender_cache "$current" "$SCORING_CACHE_THRESHOLD")
+    merged=$(apply_cache_updates "$sanitized" "$updates_json")
+    safe_write_json_atomic "$SENDER_CACHE_FILE" "$merged"
+  }
+  PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$SENDER_CACHE_LOCK" _persist_cache
 }
 
 extract_llm_content_array() {
