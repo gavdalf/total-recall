@@ -141,3 +141,7 @@ ambient_actions:
       script: ""
     places_lookup:
       enabled: false
+
+# Google API CLI backend (gog, gws, or custom path)
+google_api:
+  cli: gog

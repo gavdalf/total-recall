@@ -12,8 +12,8 @@ fi
 readonly AIE_TOOLS_SH_LOADED=1
 
 # ─── Bootstrap aie-config if not already loaded ──────────────────────────────
+_AIE_TOOLS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "${AIE_CONFIG_SH_LOADED:-}" ]]; then
-  _AIE_TOOLS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   source "$_AIE_TOOLS_SCRIPT_DIR/aie-config.sh"
   aie_init
   aie_load_env
@@ -45,6 +45,9 @@ export CALENDAR_ACCOUNT CALENDAR_KEYRING_PASSWORD
 export IONOS_ACCOUNT WEATHER_URL HEALTH_DATA_DIR WEB_SEARCH_SCRIPT
 export PLACES_ENABLED PLACES_LAT PLACES_LNG PLACES_LIMIT
 export MAX_ACTIONS ACTION_BUDGET_SECONDS
+
+# ─── Load Google API abstraction ──────────────────────────────────────────────
+source "$_AIE_TOOLS_SCRIPT_DIR/google-api.sh"
 
 # ─── Global token counter (set by call_openrouter) ───────────────────────────
 TOKENS_USED=0
@@ -244,7 +247,7 @@ run_tool() {
         run_timed_capture "$effective_timeout" 2000 env \
           GOG_KEYRING_PASSWORD="$CALENDAR_KEYRING_PASSWORD" \
           GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
-          gog calendar events "$(aie_get "connectors.calendar.calendar_id" "primary")" --from "$from" --to "$to"
+          gapi_calendar_events "$(aie_get "connectors.calendar.calendar_id" "primary")" --from "$from" --to "$to"
       fi
       ;;
     gmail_search)
@@ -255,7 +258,7 @@ run_tool() {
         run_timed_capture "$effective_timeout" 2000 env \
           GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" \
           GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-          gog gmail search "$query" --limit 5
+          gapi_gmail_search "$query" --limit 5
       fi
       ;;
     gmail_read)
@@ -266,7 +269,7 @@ run_tool() {
         run_timed_capture "$effective_timeout" 3000 env \
           GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" \
           GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-          gog gmail get "$query"
+          gapi_gmail_get "$query"
       fi
       ;;
     ionos_search)

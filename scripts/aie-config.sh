@@ -146,6 +146,9 @@ defaults = {
             "max_alerts_per_day": 2,
         },
     },
+    "google_api": {
+        "cli": "gog",
+    },
     "ambient_actions": {
         "enabled": True,
         "max_actions": 5,
@@ -208,7 +211,7 @@ if os.path.exists(config_file):
         raise SystemExit("AIE config must be a YAML mapping at the top level")
     merge(config, loaded)
 
-today = __import__("datetime").datetime.now(__import__("datetime").UTC).strftime("%Y-%m-%d")
+today = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m-%d")
 config["workspace"] = os.path.abspath(os.path.expanduser(str(config.get("workspace") or workspace)))
 
 def expand_path(value, base_dir):

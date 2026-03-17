@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# observer-watcher.sh — inotify-based reactive observer trigger
+# observer-watcher.sh — reactive observer trigger
 # Part of Total Recall skill
-# Linux only — requires inotifywait. On macOS, use cron-only mode.
+# Linux: uses inotifywait | macOS: uses fswatch
 
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$SKILL_DIR/scripts/_compat.sh"
 
-# Check inotify availability
-if ! has_inotify; then
-  echo "ERROR: inotifywait not found. The reactive watcher requires Linux with inotify-tools."
-  echo "On macOS, use cron-only mode (observer runs every 15 min via cron)."
-  exit 1
+# Check file watcher availability
+if $_IS_MACOS; then
+  if ! has_fswatch; then
+    echo "ERROR: fswatch not found. Install with: brew install fswatch"
+    echo "Or use cron-only mode (observer runs every 15 min via cron)."
+    exit 1
+  fi
+else
+  if ! has_inotify; then
+    echo "ERROR: inotifywait not found. Install with: sudo apt install inotify-tools"
+    echo "Or use cron-only mode (observer runs every 15 min via cron)."
+    exit 1
+  fi
 fi
 
 WORKSPACE="${OPENCLAW_WORKSPACE:-$(cd "$SKILL_DIR/../.." && pwd)}"
@@ -123,12 +131,27 @@ MAIN_IDS=$(get_main_session_ids || true)
 CACHE_TIME=$(date +%s)
 log "Tracking $(echo "${MAIN_IDS:-}" | grep -c "." || echo 0) main session files"
 
-inotifywait -m -e modify --format '%f' "$SESSIONS_DIR" 2>/dev/null | while read -r FILENAME; do
-  [[ "$FILENAME" == *.jsonl ]] || continue
-  is_main_session "$FILENAME" || continue
+handle_event() {
+  local filepath="$1"
+  local FILENAME
+  FILENAME=$(basename "$filepath")
+  [[ "$FILENAME" == *.jsonl ]] || return 0
+  is_main_session "$FILENAME" || return 0
   ACCUMULATED_LINES=$(( ACCUMULATED_LINES + 1 ))
   check_cron_ran
   if [ "$ACCUMULATED_LINES" -ge "$LINE_THRESHOLD" ]; then
     trigger_observer
   fi
-done
+}
+
+if $_IS_MACOS; then
+  # macOS: use fswatch
+  fswatch -0 --event Updated "$SESSIONS_DIR" 2>/dev/null | while IFS= read -r -d '' FILEPATH; do
+    handle_event "$FILEPATH"
+  done
+else
+  # Linux: use inotifywait
+  inotifywait -m -e modify --format '%f' "$SESSIONS_DIR" 2>/dev/null | while read -r FILENAME; do
+    handle_event "$SESSIONS_DIR/$FILENAME"
+  done
+fi
