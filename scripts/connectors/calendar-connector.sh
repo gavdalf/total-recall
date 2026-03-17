@@ -30,6 +30,10 @@ for arg in "$@"; do
   [[ "$arg" == "--dry-run" ]] && DRY_RUN="true"
 done
 
+log() {
+  echo "[calendar] $*"
+}
+
 if ! aie_bool "connectors.calendar.enabled"; then
   log "SKIP disabled in config"
   exit 0
@@ -39,10 +43,6 @@ if [[ -z "$CALENDAR_ACCOUNT" || -z "$KEYRING_PASSWORD" ]]; then
   log "SKIP missing calendar account or keyring password in config"
   exit 0
 fi
-
-log() {
-  echo "[calendar] $*"
-}
 
 health_check() {
   if ! GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \

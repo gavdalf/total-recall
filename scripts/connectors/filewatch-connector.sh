@@ -66,17 +66,21 @@ for filepath in "${WATCH_FILES[@]}"; do
   [[ -f "$filepath" ]] || continue
 
   filename=$(basename "$filepath")
-  file_mtime=$(stat -c %Y "$filepath" 2>/dev/null || stat -f %m "$filepath" 2>/dev/null || echo 0)
-  file_size=$(stat -c %s "$filepath" 2>/dev/null || stat -f %z "$filepath" 2>/dev/null || echo 0)
+  cur_mtime=$(file_mtime "$filepath")
+  if $_IS_MACOS; then
+    cur_size=$(stat -f %z "$filepath" 2>/dev/null || echo 0)
+  else
+    cur_size=$(stat -c %s "$filepath" 2>/dev/null || echo 0)
+  fi
   file_key="fw-${filename}"
 
   # Check against previous state
   prev_mtime=$(echo "$PREV_STATE" | jq -r --arg k "$file_key" '.[$k].mtime // "0"')
 
-  if [[ "$file_mtime" != "$prev_mtime" && "$prev_mtime" != "0" ]]; then
+  if [[ "$cur_mtime" != "$prev_mtime" && "$prev_mtime" != "0" ]]; then
     # File changed since last sweep
     prev_size=$(echo "$PREV_STATE" | jq -r --arg k "$file_key" '.[$k].size // "0"')
-    size_delta=$((file_size - prev_size))
+    size_delta=$((cur_size - prev_size))
 
     # Determine importance based on file
     importance=0.4
@@ -85,17 +89,17 @@ for filepath in "${WATCH_FILES[@]}"; do
 
     payload=$(jq -cn \
       --arg file "$filename" --arg path "$filepath" \
-      --argjson size "$file_size" --argjson delta "$size_delta" \
+      --argjson size "$cur_size" --argjson delta "$size_delta" \
       '{file: $file, path: $path, size_bytes: $size, size_delta: $delta}')
 
-    bus_id="fw-${filename}-${file_mtime}"
+    bus_id="fw-${filename}-${cur_mtime}"
     emit_event "$bus_id" "observations_updated" "$importance" "$payload"
     COUNT=$((COUNT + 1))
   fi
 
   # Update state
   NEW_STATE=$(echo "$NEW_STATE" | jq \
-    --arg k "$file_key" --arg mt "$file_mtime" --arg sz "$file_size" \
+    --arg k "$file_key" --arg mt "$cur_mtime" --arg sz "$cur_size" \
     '.[$k] = {mtime: $mt, size: $sz}')
 done
 

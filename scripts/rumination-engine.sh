@@ -136,8 +136,10 @@ UPCOMING_FROM_BUS=$(echo "$UNPROCESSED_JSON" | jq -r \
   '.[] | select(.source == "calendar") | "- \(.payload.title) (\(.payload.hours_until // "?")h away)"' \
   2>/dev/null | head -8 || echo "")
 
-# Also try calendar API for fresh data
-UPCOMING_CAL=$(portable_timeout 10 gapi_calendar_events "primary" --days 2 --json 2>/dev/null | \
+# Also try calendar API for fresh data (with auth env)
+UPCOMING_CAL=$(portable_timeout 10 env \
+  GOG_KEYRING_PASSWORD="$CALENDAR_KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
+  gapi_calendar_events "primary" --days 2 --json 2>/dev/null | \
   jq -r '.[] | "- \(.summary) at \(.start.dateTime // .start.date)"' 2>/dev/null | head -8 || echo "")
 UPCOMING="${UPCOMING_FROM_BUS:-$UPCOMING_CAL}"
 [[ -z "$UPCOMING" ]] && UPCOMING="None detected"
@@ -882,11 +884,15 @@ else
     PROCESSED_IDS_JSON=$(echo "$SOURCE_IDS" | tr ',' '\n' | jq -Rn '[inputs | select(length > 0)]')
     TMP_BUS=$(mktemp "${BUS}.tmp.XXXXXX")
     _mark_consumed() {
-      jq -c \
+      if jq -c \
         --argjson processed_ids "$PROCESSED_IDS_JSON" \
         'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = "'"$RUN_ID"'" else . end' \
-        "$BUS" > "$TMP_BUS"
-      mv "$TMP_BUS" "$BUS"
+        "$BUS" > "$TMP_BUS" && [[ -s "$TMP_BUS" ]]; then
+        mv "$TMP_BUS" "$BUS"
+      else
+        rm -f "$TMP_BUS"
+        echo "[rumination] WARN: jq mark-consumed failed, bus unchanged" >&2
+      fi
     }
     portable_flock_exec "$BUS_LOCK" _mark_consumed
     log "Marked $EVENT_COUNT events as consumed in bus (exact IDs matched)"

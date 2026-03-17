@@ -63,20 +63,30 @@ has_systemd_user() {
 # For non-blocking (flock -n):
 #   portable_flock_try "$LOCKFILE"   → returns 0 if lock acquired, 1 if busy
 #   portable_flock_release "$LOCKFILE"
+# Helper: check and break stale lock if older than 5 minutes
+# Returns 0 if stale lock was removed, 1 if lock is fresh
+_check_stale_lock() {
+  local lockdir="$1"
+  local lock_age
+  if $_IS_MACOS; then
+    lock_age=$(( $(date +%s) - $(stat -f %m "$lockdir" 2>/dev/null || echo 0) ))
+  else
+    lock_age=$(( $(date +%s) - $(stat -c %Y "$lockdir" 2>/dev/null || echo 0) ))
+  fi
+  if [[ $lock_age -gt 300 ]]; then
+    rmdir "$lockdir" 2>/dev/null || true
+    return 0
+  fi
+  return 1
+}
+
 portable_flock_exec() {
   local lockdir="$1.d"
   shift
   local wait_max="${PORTABLE_FLOCK_WAIT:-30}"
   local waited=0
   while ! mkdir "$lockdir" 2>/dev/null; do
-    # Stale lock detection: if lock dir is older than 5 minutes, break it
-    if $_IS_MACOS; then
-      local lock_age=$(( $(date +%s) - $(stat -f %m "$lockdir" 2>/dev/null || echo 0) ))
-    else
-      local lock_age=$(( $(date +%s) - $(stat -c %Y "$lockdir" 2>/dev/null || echo 0) ))
-    fi
-    if [[ $lock_age -gt 300 ]]; then
-      rmdir "$lockdir" 2>/dev/null || true
+    if _check_stale_lock "$lockdir"; then
       continue
     fi
     sleep 0.2
@@ -87,8 +97,8 @@ portable_flock_exec() {
     fi
   done
   # shellcheck disable=SC2064
-  trap "rmdir '$lockdir' 2>/dev/null || true" RETURN
-  eval "$@"
+  trap "rmdir $(printf '%q' "$lockdir") 2>/dev/null || true" RETURN
+  "$@"
 }
 
 # Non-blocking lock acquire (replaces flock -n)
@@ -97,14 +107,7 @@ portable_flock_try() {
   if mkdir "$lockdir" 2>/dev/null; then
     return 0
   fi
-  # Stale lock detection
-  if $_IS_MACOS; then
-    local lock_age=$(( $(date +%s) - $(stat -f %m "$lockdir" 2>/dev/null || echo 0) ))
-  else
-    local lock_age=$(( $(date +%s) - $(stat -c %Y "$lockdir" 2>/dev/null || echo 0) ))
-  fi
-  if [[ $lock_age -gt 300 ]]; then
-    rmdir "$lockdir" 2>/dev/null || true
+  if _check_stale_lock "$lockdir"; then
     mkdir "$lockdir" 2>/dev/null && return 0
   fi
   return 1

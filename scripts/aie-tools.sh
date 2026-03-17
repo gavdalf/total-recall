@@ -283,7 +283,7 @@ run_tool() {
       if ! echo "$_ionos_q" | grep -qiE '\b(subject|body|from|to|date|before|after|flag)\b'; then
         _ionos_q="subject $_ionos_q or body $_ionos_q"
       fi
-      run_timed_capture "$effective_timeout" 2000 bash -c 'himalaya envelope list --account "$1" --page-size 5 -- $2 order by date desc 2>&1 | sed "s/\x1b\[[0-9;]*m//g"' _ "$IONOS_ACCOUNT" "$_ionos_q"
+      run_timed_capture "$effective_timeout" 2000 bash -c 'himalaya envelope list --account "$1" --page-size 5 -- "$2" order by date desc 2>&1 | sed "s/\x1b\[[0-9;]*m//g"' _ "$IONOS_ACCOUNT" "$_ionos_q"
       ;;
     todoist_query)
       effective_timeout=$(cap_timeout 10 "$remaining_budget")

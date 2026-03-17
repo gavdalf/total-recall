@@ -31,11 +31,11 @@ MARKER_FILE="$MEMORY_DIR/.observer-last-run"
 HASH_FILE="$MEMORY_DIR/.observer-last-hash"
 LOCK_FILE="$WORKSPACE/logs/reflector.lock"
 
-# Source env if available (grep-guard: only export KEY=VALUE lines)
+# Source env if available
 if [ -f "$WORKSPACE/.env" ]; then
   set -a
-  # Load provider config + backward compatible OPENROUTER key
-  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY)=' "$WORKSPACE/.env" 2>/dev/null)" || true
+  # shellcheck disable=SC1090
+  source "$WORKSPACE/.env" 2>/dev/null || true
   set +a
 fi
 
