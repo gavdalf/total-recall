@@ -42,6 +42,11 @@ has_inotify() {
   command -v inotifywait &>/dev/null
 }
 
+# Check if fswatch is available (macOS file watcher)
+has_fswatch() {
+  command -v fswatch &>/dev/null
+}
+
 # Check if systemctl --user is available
 has_systemd_user() {
   command -v systemctl &>/dev/null && systemctl --user status &>/dev/null 2>&1

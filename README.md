@@ -12,17 +12,24 @@ Total Recall v2.0 keeps the existing v1.x stack intact:
 
 It also adds the Ambient Intelligence Engine (AIE): a configurable sensor and rumination pipeline that can watch external systems, think about what changed, maintain a preconscious buffer, and surface urgent items.
 
-Prerequisites: `python3`, `jq`, `curl`, and `PyYAML`.
+Supports **Linux** and **macOS**. Requires Python 3.9+, `jq`, `curl`, and `PyYAML`.
 
-Install PyYAML with:
+### Linux
 
 ```bash
-python3 -m pip install PyYAML
-# or on Debian/Ubuntu:
-sudo apt install python3-yaml
+sudo apt install python3 python3-yaml jq curl inotify-tools  # Debian/Ubuntu
 ```
 
-`setup.sh` will verify all dependencies are present before continuing.
+### macOS
+
+```bash
+brew install python3 jq curl fswatch
+pip3 install PyYAML
+```
+
+`fswatch` is optional — it enables the reactive file watcher on macOS. Without it, the cron-based observer (every 15 min) provides full coverage.
+
+`setup.sh` will verify all dependencies and install the appropriate watcher service (systemd on Linux, launchd on macOS).
 
 ## Architecture
 
@@ -101,6 +108,7 @@ All new AIE behavior is controlled by [`config/aie.yaml`](config/aie.yaml).
 - `notifications`: quiet hours plus Telegram, Discord, and generic webhook delivery
 - `thresholds`: cooldowns, pruning windows, emergency thresholds
 - `ambient_actions`: global action toggle plus read-only tool settings
+- `google_api`: configurable Google API CLI backend (gog, gws, or custom)
 
 ### Connector toggles
 
@@ -180,6 +188,27 @@ thresholds:
     expires_within_seconds: 14400
     max_alerts_per_day: 2
 ```
+
+### Google API CLI
+
+The Google Calendar and Gmail connectors use an external CLI tool to access Google APIs. By default this is `gog`, but you can switch to `gws` or provide a custom wrapper script:
+
+```yaml
+google_api:
+  cli: gog          # default — uses gog CLI
+  # cli: gws        # alternative — uses gws CLI (different argument syntax)
+  # cli: /path/to/my-wrapper  # custom wrapper (receives gog-style arguments)
+```
+
+The abstraction layer in `scripts/google-api.sh` translates between CLI syntaxes automatically:
+
+| Operation | gog | gws |
+|-----------|-----|-----|
+| Calendar events | `gog calendar events ID --days N --max M --json` | `gws calendar events list --params '{"calendarId":"ID",...}'` |
+| Gmail search | `gog gmail search "query" --limit 5` | `gws gmail users messages list --params '{"userId":"me","q":"query",...}'` |
+| Gmail read | `gog gmail get MSG_ID` | `gws gmail users messages get --params '{"userId":"me","id":"MSG_ID",...}'` |
+
+Custom wrappers receive gog-style arguments and should produce compatible JSON output.
 
 ### Connector reference
 
@@ -307,6 +336,7 @@ See:
 | `scripts/ambient-actions.sh` | read-only enrichment loop |
 | `scripts/emergency-surface.sh` | urgent alert surfacing |
 | `scripts/buffer-inject.sh` | inject buffer back into active session |
+| `scripts/google-api.sh` | Google API CLI abstraction (gog/gws/custom) |
 | `scripts/connectors/*.sh` | pluggable AIE sensors |
 | `config/aie.yaml` | AIE runtime configuration |
 

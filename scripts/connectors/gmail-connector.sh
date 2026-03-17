@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
+source "$SCRIPT_DIR/google-api.sh"
 
 BUS="$(aie_get "paths.events_bus" "$AIE_WORKSPACE/memory/events/bus.jsonl")"
 BUS_LOCK="${BUS}.lock"
@@ -149,8 +150,8 @@ fi
 
 health_check() {
   if ! run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-    gog gmail messages search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
-    log "ERROR: health_check failed — gog gmail unreachable"
+    gapi_gmail_messages_search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
+    log "ERROR: health_check failed — gmail API unreachable"
     return 1
   fi
   log "health_check OK"
@@ -219,7 +220,7 @@ gmail_fetch_body_excerpt() {
   local body_candidate=""
 
   raw=$(run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-    gog gmail get "$msg_id" 2>/dev/null || true)
+    gapi_gmail_get "$msg_id" 2>/dev/null || true)
   raw=$(printf '%s' "$raw" | head -c 200000)
 
   if [[ -n "$raw" ]] && printf '%s' "$raw" | jq -e . >/dev/null 2>&1; then
@@ -432,7 +433,7 @@ SENDER_CACHE=$(sanitize_sender_cache "$(load_json_object_file "$SENDER_CACHE_FIL
 CACHE_UPDATES='{}'
 
 EMAILS_RAW=$(run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-  gog gmail messages search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json 2>/dev/null || echo '{"messages":[]}')
+  gapi_gmail_messages_search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json 2>/dev/null || echo '{"messages":[]}')
 EMAILS=$(printf '%s' "$EMAILS_RAW" | jq -c '
   if type == "array" then
     .

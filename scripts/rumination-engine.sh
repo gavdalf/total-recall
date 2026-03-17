@@ -13,6 +13,7 @@ source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
 source "$SCRIPT_DIR/aie-tools.sh"
+source "$SCRIPT_DIR/google-api.sh"
 
 # Normalize LLM provider vars (LLM_API_KEY preferred; OPENROUTER_API_KEY backward-compatible)
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
@@ -134,8 +135,8 @@ UPCOMING_FROM_BUS=$(echo "$UNPROCESSED_JSON" | jq -r \
   '.[] | select(.source == "calendar") | "- \(.payload.title) (\(.payload.hours_until // "?")h away)"' \
   2>/dev/null | head -8 || echo "")
 
-# Also try gog calendar for fresh data
-UPCOMING_CAL=$(timeout 10 gog calendar list --days 2 --json 2>/dev/null | \
+# Also try calendar API for fresh data
+UPCOMING_CAL=$(timeout 10 gapi_calendar_events "primary" --days 2 --json 2>/dev/null | \
   jq -r '.[] | "- \(.summary) at \(.start.dateTime // .start.date)"' 2>/dev/null | head -8 || echo "")
 UPCOMING="${UPCOMING_FROM_BUS:-$UPCOMING_CAL}"
 [[ -z "$UPCOMING" ]] && UPCOMING="None detected"
