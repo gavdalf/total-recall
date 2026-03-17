@@ -169,7 +169,7 @@ process_due_reminders() {
       continue
     fi
     
-    trigger_epoch=$(date -u -d "$trigger_at" +%s 2>/dev/null || echo "")
+    trigger_epoch=$(_e=$(date_to_epoch "$trigger_at"); [[ "$_e" -gt 0 ]] 2>/dev/null && echo "$_e" || echo "")
     if [[ -z "$trigger_epoch" ]]; then
       echo "$line" >> "$tmp_reminders"
       continue
@@ -551,7 +551,7 @@ execute_remind() {
   fi
   
   # Validate it's a valid datetime
-  if ! date -u -d "$trigger_at" +%s &>/dev/null; then
+  if [[ "$(date_to_epoch "$trigger_at")" -le 0 ]] 2>/dev/null; then
     log "Invalid trigger_at datetime '$trigger_at', skipping: ${reminder:0:50}..."
     return 1
   fi

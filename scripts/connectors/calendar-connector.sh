@@ -69,8 +69,9 @@ emit_event() {
       expires_at: (if $expires_at == "null" then null else $expires_at end),
       importance: $importance, actionable: $actionable,
       payload: $payload, consumed: false, consumer_watermark: null}')
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    portable_flock_exec "$BUS_LOCK" "echo '$event' >> '$BUS'"
+    portable_flock_exec "$BUS_LOCK" _emit_to_bus
     log "Emitted: $type → $id"
   else
     log "[DRY-RUN] Would emit: $type | $(echo "$payload" | jq -r '.title // "?"') @ $(echo "$payload" | jq -r '.start // "?"')"
@@ -115,7 +116,7 @@ while IFS= read -r ev; do
   ev_status=$(echo "$ev" | jq -r '.status // "confirmed"')
 
   # Create a content hash for change detection
-  ev_hash=$(echo "${ev_title}|${ev_start}|${ev_end}|${ev_location}|${ev_status}" | md5sum | cut -d' ' -f1)
+  ev_hash=$(echo "${ev_title}|${ev_start}|${ev_end}|${ev_location}|${ev_status}" | md5_hash)
 
   # Hours until event starts
   hours_until=999
@@ -178,7 +179,7 @@ while IFS= read -r ev; do
   # Expires_at = event start time (event becomes irrelevant once it starts)
   expires_at="null"
   if [[ -n "$ev_end" ]]; then
-    expires_at=$(date -u -d "$ev_end" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "null")
+    expires_at=$(date_format_iso_utc "$ev_end")
   fi
 
   emit_event "$bus_id" "$event_type" "$importance" "true" "$payload" "$expires_at"

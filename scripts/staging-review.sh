@@ -17,6 +17,9 @@ set -euo pipefail
 OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/workspace}"
 STAGING_DIR="$OPENCLAW_WORKSPACE/memory/dream-staging"
 
+# Cross-platform compatibility helpers
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_compat.sh"
+
 err()  { echo "ERROR: $*" >&2; }
 info() { echo "$*"; }
 
@@ -47,7 +50,7 @@ resolve_staging_file() {
       if [ -f "$STAGING_DIR/$arg" ]; then
         resolved="$STAGING_DIR/$arg"
       else
-        resolved="$(cd "$OPENCLAW_WORKSPACE" && realpath -m "$arg" 2>/dev/null || true)"
+        resolved="$(cd "$OPENCLAW_WORKSPACE" && portable_realpath_m "$arg" 2>/dev/null || true)"
       fi
       ;;
   esac
@@ -59,7 +62,7 @@ resolve_staging_file() {
 
   # Safety: must be inside STAGING_DIR
   local real_staging
-  real_staging="$(realpath -m "$STAGING_DIR" 2>/dev/null || echo "$STAGING_DIR")"
+  real_staging="$(portable_realpath_m "$STAGING_DIR" 2>/dev/null || echo "$STAGING_DIR")"
   case "$resolved" in
     "$real_staging"/*)
       : # ok
@@ -113,9 +116,11 @@ cmd_list() {
 
   # Find pending proposals: .md files that do NOT end in .approved.md
   local proposals=()
-  while IFS= read -r -d '' f; do
-    proposals+=("$f")
-  done < <(find "$STAGING_DIR" -maxdepth 1 -name '*.md' ! -name '*.approved.md' ! -name '.gitkeep' -print0 2>/dev/null | sort -z)
+  if $_IS_MACOS; then
+    while IFS= read -r f; do proposals+=("$f"); done < <(find "$STAGING_DIR" -maxdepth 1 -name '*.md' ! -name '*.approved.md' ! -name '.gitkeep' -print 2>/dev/null | sort)
+  else
+    while IFS= read -r -d '' f; do proposals+=("$f"); done < <(find "$STAGING_DIR" -maxdepth 1 -name '*.md' ! -name '*.approved.md' ! -name '.gitkeep' -print0 2>/dev/null | sort -z)
+  fi
 
   if [ "${#proposals[@]}" -eq 0 ]; then
     info "No pending proposals in $STAGING_DIR"

@@ -5,6 +5,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
@@ -23,13 +24,14 @@ log() {
 }
 
 iso_to_epoch() {
-  local iso="$1"
-  date -u -d "$iso" +%s 2>/dev/null || echo ""
+  local epoch
+  epoch=$(date_to_epoch "$1")
+  [[ "$epoch" -gt 0 ]] 2>/dev/null && echo "$epoch" || echo ""
 }
 
 hash_text() {
   local text="$1"
-  printf '%s' "$text" | sha256sum | awk '{print $1}'
+  printf '%s' "$text" | sha256_hash
 }
 
 load_env() {
@@ -305,7 +307,7 @@ main() {
       tmp_summaries="$(mktemp)"
       tmp_rum_rev="$(mktemp)"
       extract_buffer_summaries > "$tmp_summaries"
-      tac "$rum_file" > "$tmp_rum_rev" 2>/dev/null
+      portable_tac "$rum_file" > "$tmp_rum_rev" 2>/dev/null
 
       while IFS= read -r summary; do
         [[ -z "$summary" ]] && continue

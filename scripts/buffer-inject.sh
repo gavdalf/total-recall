@@ -46,7 +46,7 @@ get_buffer_content_hash() {
   # FIX: Hash only the insight lines, stripping the timestamp header
   # so that unchanged insights don't look "new" just because the timestamp changed
   if [[ -f "$BUFFER_FILE" ]]; then
-    grep -E '^[🧠📋👁️🚨📝💭]' "$BUFFER_FILE" 2>/dev/null | sha256sum | awk '{print $1}'
+    grep -E '^[🧠📋👁️🚨📝💭]' "$BUFFER_FILE" 2>/dev/null | sha256_hash
   else
     echo "none"
   fi

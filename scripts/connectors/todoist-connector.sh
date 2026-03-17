@@ -52,8 +52,9 @@ emit_event() {
     '{id: $id, source: "todoist", type: $type, timestamp: $timestamp,
       expires_at: null, importance: $importance, actionable: true,
       payload: $payload, consumed: false, consumer_watermark: null}')
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    portable_flock_exec "$BUS_LOCK" "echo '$event' >> '$BUS'"
+    portable_flock_exec "$BUS_LOCK" _emit_to_bus
     log "Emitted: $type → $id"
   else
     log "[DRY-RUN] Would emit: $type | $(echo "$payload" | jq -r '.content // "?"') (due: $(echo "$payload" | jq -r '.due // "?"'))"

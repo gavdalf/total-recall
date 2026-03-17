@@ -13,6 +13,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# OAuth / API token caches
+.gog-token-cache.json
+
 # Backups created by scripts
 observation-backups/
 *.bak*

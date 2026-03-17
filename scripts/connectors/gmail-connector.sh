@@ -164,8 +164,9 @@ emit_event() {
       expires_at: null, importance: $importance, actionable: true,
       payload: $payload, consumed: false, consumer_watermark: null}') || return 0
 
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    if ! PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$BUS_LOCK" "echo '$event' >> '$BUS'"; then
+    if ! PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$BUS_LOCK" _emit_to_bus; then
       log "WARN: Failed to write event to bus (lock or IO error)"
       return 0
     fi

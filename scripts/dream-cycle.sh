@@ -550,7 +550,7 @@ cmd_write_staging() {
 
   # Resolve to absolute and verify it stays within STAGING_DIR (prevents path traversal)
   local abs_staging_file
-  abs_staging_file="$(cd "$OPENCLAW_WORKSPACE" && realpath -m "$normalised_path" 2>/dev/null || true)"
+  abs_staging_file="$(cd "$OPENCLAW_WORKSPACE" && portable_realpath_m "$normalised_path" 2>/dev/null || true)"
 
   if [ -z "$abs_staging_file" ]; then
     err "Cannot resolve staging file path: $staging_file"
@@ -559,7 +559,7 @@ cmd_write_staging() {
 
   # Ensure the resolved path is under STAGING_DIR (no path traversal)
   local real_staging_dir
-  real_staging_dir="$(realpath -m "$STAGING_DIR" 2>/dev/null || echo "$STAGING_DIR")"
+  real_staging_dir="$(portable_realpath_m "$STAGING_DIR" 2>/dev/null || echo "$STAGING_DIR")"
 
   case "$abs_staging_file" in
     "$real_staging_dir"/*)

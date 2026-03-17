@@ -165,18 +165,39 @@ date_days_offset() {
 }
 
 # date_to_epoch "DATESTRING" — convert an ISO-ish date/datetime to epoch seconds
+# Handles: 2026-03-17T14:00:00Z, 2026-03-17T14:00:00+08:00, 2026-03-17T14:00:00-05:00, 2026-03-17
 date_to_epoch() {
   local ds="$1"
   if $_IS_MACOS; then
-    # Try multiple formats: full ISO, date-only, with timezone offset
-    local stripped="${ds%%+*}"  # strip timezone offset like +08:00
-    stripped="${stripped%%Z*}"  # strip Z suffix
-    # Try with time component
+    local bare="$ds" input_offset=0 has_tz=false
+    if [[ "$bare" == *Z ]]; then
+      bare="${bare%Z}"
+      has_tz=true
+    elif [[ "$bare" == *[+-][0-9][0-9]:[0-9][0-9] ]]; then
+      # Extract timezone suffix using parameter expansion (bash 3.2 compatible)
+      local tz_suffix="${bare:$(( ${#bare} - 6 ))}"  # last 6 chars: +08:00 or -05:00
+      local sign="${tz_suffix:0:1}"
+      local hh="${tz_suffix:1:2}"
+      local mm="${tz_suffix:4:2}"
+      bare="${bare%[+-][0-9][0-9]:[0-9][0-9]}"
+      input_offset=$(( 10#$hh * 3600 + 10#$mm * 60 ))
+      [[ "$sign" == "-" ]] && input_offset=$(( -input_offset ))
+      has_tz=true
+    fi
     local epoch
-    epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$stripped" '+%s' 2>/dev/null) && { echo "$epoch"; return; }
-    # Try date-only
-    epoch=$(date -j -f "%Y-%m-%d" "$stripped" '+%s' 2>/dev/null) && { echo "$epoch"; return; }
-    echo 0
+    if $has_tz; then
+      # Parse bare datetime as-if UTC, then subtract input timezone offset
+      epoch=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "$bare" '+%s' 2>/dev/null) || \
+      epoch=$(TZ=UTC date -j -f "%Y-%m-%d" "$bare" '+%s' 2>/dev/null) || \
+      { echo 0; return; }
+      echo $(( epoch - input_offset ))
+    else
+      # No timezone info — parse as local time
+      epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$bare" '+%s' 2>/dev/null) || \
+      epoch=$(date -j -f "%Y-%m-%d" "$bare" '+%s' 2>/dev/null) || \
+      { echo 0; return; }
+      echo "$epoch"
+    fi
   else
     date -d "$ds" '+%s' 2>/dev/null || echo 0
   fi
@@ -209,6 +230,54 @@ date_future_days() {
     date -v "+${n}d" '+%Y-%m-%d'
   else
     date -d "+${n} days" '+%Y-%m-%d'
+  fi
+}
+
+# ─── Portable SHA-256 ────────────────────────────────────────────────────────
+# SHA-256 hash of stdin (portable). macOS lacks sha256sum.
+sha256_hash() {
+  if command -v sha256sum &>/dev/null; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    openssl dgst -sha256 | sed 's/.*= //'
+  fi
+}
+
+# ─── Portable tac ────────────────────────────────────────────────────────────
+# Reverse lines of file(s). macOS lacks tac.
+portable_tac() {
+  if command -v tac &>/dev/null; then
+    tac "$@"
+  else
+    tail -r "$@"
+  fi
+}
+
+# ─── Portable realpath -m ────────────────────────────────────────────────────
+# Resolve path without requiring it to exist. macOS realpath lacks -m.
+portable_realpath_m() {
+  if realpath -m / &>/dev/null; then
+    realpath -m "$1"
+  else
+    python3 -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$1" 2>/dev/null || echo "$1"
+  fi
+}
+
+# ─── Portable date → ISO UTC ────────────────────────────────────────────────
+# Normalize an ISO-ish datetime string to UTC ISO 8601. Returns "null" on failure.
+date_format_iso_utc() {
+  local epoch
+  epoch=$(date_to_epoch "$1")
+  if [[ "$epoch" -gt 0 ]] 2>/dev/null; then
+    if $_IS_MACOS; then
+      date -u -r "$epoch" '+%Y-%m-%dT%H:%M:%SZ'
+    else
+      date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "null"
+    fi
+  else
+    echo "null"
   fi
 }
 
