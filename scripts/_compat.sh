@@ -119,6 +119,11 @@ portable_flock_release() {
 # macOS has no coreutils timeout. Uses perl alarm as fallback.
 # Usage: portable_timeout SECONDS COMMAND [ARGS...]
 #        portable_timeout --kill-after=K SECONDS COMMAND [ARGS...]
+#
+# Uses background subshell + wait to enforce timeouts. Handles the common
+# pattern `env KEY=VAL... bash_function args` by converting `env` prefix
+# into inline variable exports inside a subshell, so bash functions remain
+# visible (external `env` binary cannot exec bash functions).
 portable_timeout() {
   local kill_after=""
   if [[ "$1" == --kill-after=* ]]; then
@@ -130,26 +135,42 @@ portable_timeout() {
   # Strip trailing 's' if present (timeout accepts "30s")
   seconds="${seconds%s}"
 
-  if command -v timeout >/dev/null 2>&1; then
-    if [[ -n "$kill_after" ]]; then
-      timeout --kill-after="$kill_after" "${seconds}s" "$@"
-    else
-      timeout "${seconds}s" "$@"
-    fi
-  elif $_IS_MACOS && command -v perl >/dev/null 2>&1; then
-    perl -e '
-      $SIG{ALRM} = sub { kill 9, $pid if $pid; exit 124 };
-      alarm shift @ARGV;
-      $pid = fork;
-      if ($pid == 0) { exec @ARGV; die "exec failed: $!" }
-      waitpid($pid, 0);
-      alarm 0;
-      exit ($? >> 8);
-    ' "$seconds" "$@"
+  # If argv starts with "env KEY=VAL... CMD ARGS", convert to inline exports
+  # inside a subshell so bash functions are still reachable.
+  if [[ "$1" == "env" ]]; then
+    shift
+    local -a _pt_env_vars=()
+    while [[ $# -gt 0 && "$1" == *=* ]]; do
+      _pt_env_vars+=("$1")
+      shift
+    done
+    (
+      for _pt_v in "${_pt_env_vars[@]}"; do export "$_pt_v"; done
+      "$@"
+    ) &
   else
-    # Last resort: no timeout enforcement
-    "$@"
+    "$@" &
   fi
+  local child=$!
+
+  (
+    sleep "$seconds"
+    kill -TERM "$child" 2>/dev/null
+    if [[ -n "$kill_after" ]]; then
+      sleep "$kill_after"
+      kill -KILL "$child" 2>/dev/null
+    fi
+  ) &
+  local watcher=$!
+  wait "$child" 2>/dev/null
+  local rc=$?
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  # If killed by our watcher, return 124 (same as GNU timeout)
+  if (( rc == 143 )); then  # SIGTERM = 128+15
+    return 124
+  fi
+  return $rc
 }
 
 # ─── Portable date helpers ───────────────────────────────────────────────────

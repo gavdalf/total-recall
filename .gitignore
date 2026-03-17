@@ -2,6 +2,12 @@
 .env
 *.log
 
+# User-specific config (contains personal info: name, location, profile)
+config/aie.yaml
+
+# Local memory / event bus (user data)
+memory/
+
 # OS files
 .DS_Store
 Thumbs.db
