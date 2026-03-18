@@ -6,6 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 
@@ -40,11 +41,7 @@ log() { echo "[ionos] $*"; }
 run_timeout() {
   local seconds="$1"
   shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --kill-after=5 "${seconds}s" "$@"
-  else
-    "$@"
-  fi
+  portable_timeout --kill-after=5 "$seconds" "$@"
 }
 
 TMP_FILES=()
@@ -159,8 +156,9 @@ emit_event() {
       expires_at: null, importance: $importance, actionable: true,
       payload: $payload, consumed: false, consumer_watermark: null}') || return 0
 
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    if ! ( flock -w "$LOCK_WAIT_SEC" -x 200 && echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"; then
+    if ! PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$BUS_LOCK" _emit_to_bus; then
       log "WARN: Failed to write event to bus (lock or IO error)"
       return 0
     fi
@@ -185,9 +183,10 @@ strip_html_to_text() {
   printf '%s' "$input" \
     | tr '\r' '\n' \
     | tr -d '\000' \
-    | sed -E 's/<(script|style)[^>]*>.*<\/\1>//gI' \
-    | sed -E 's/<br[[:space:]]*\/?[[:space:]]*>/\n/gI' \
-    | sed -E 's/<\/p>/\n/gI' \
+    | sed -E 's/<[Ss][Cc][Rr][Ii][Pp][Tt][^>]*>.*<\/[Ss][Cc][Rr][Ii][Pp][Tt]>//g' \
+    | sed -E 's/<[Ss][Tt][Yy][Ll][Ee][^>]*>.*<\/[Ss][Tt][Yy][Ll][Ee]>//g' \
+    | sed -E 's/<[Bb][Rr][[:space:]]*\/?[[:space:]]*>/\n/g' \
+    | sed -E 's/<\/[Pp]>/\n/g' \
     | sed -E 's/<[^>]+>/ /g' \
     | sed -E "s/&nbsp;/ /g; s/&amp;/\\&/g; s/&lt;/</g; s/&gt;/>/g; s/&quot;/\"/g; s/&#39;/'/g" \
     | awk 'NF{print}'
@@ -223,7 +222,7 @@ ionos_fetch_message_headers() {
   [[ -z "$raw" ]] && { printf '{}\n'; return; }
 
   headers=$(printf '%s\n' "$raw" | awk 'BEGIN{done=0} {if(done==0){print}} /^$/{done=1; exit}')
-  unfolded=$(printf '%s\n' "$headers" | sed ':a;N;$!ba;s/\n[ \t]+/ /g')
+  unfolded=$(printf '%s\n' "$headers" | perl -0pe 's/\n[ \t]+/ /g')
 
   subject=$(parse_ionos_header_field "Subject" "$unfolded" | tr -d '\000' | cut -c1-200)
   from=$(parse_ionos_header_field "From" "$unfolded" | tr -d '\000' | cut -c1-180)
@@ -338,16 +337,14 @@ persist_sender_cache_updates() {
     return 0
   fi
 
-  (
-    flock -w "$LOCK_WAIT_SEC" -x 201 || exit 1
-
+  _persist_cache() {
     local current sanitized merged
     current=$(load_json_object_file "$SENDER_CACHE_FILE")
     sanitized=$(sanitize_sender_cache "$current" "$SCORING_CACHE_THRESHOLD")
     merged=$(apply_cache_updates "$sanitized" "$updates_json")
-
     safe_write_json_atomic "$SENDER_CACHE_FILE" "$merged"
-  ) 201>"$SENDER_CACHE_LOCK"
+  }
+  PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$SENDER_CACHE_LOCK" _persist_cache
 }
 
 extract_llm_content_array() {

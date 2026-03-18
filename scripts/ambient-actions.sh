@@ -11,6 +11,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
@@ -133,7 +134,7 @@ MAX_REMIND=3
 # --- Check daily notify count from action log ---
 get_daily_notify_count() {
   local today_date="$TODAY"
-  grep -c "\"action_type\":\"notify\"" "$ACTION_LOG" 2>/dev/null | grep -o '[0-9]*' || echo "0"
+  grep "$today_date" "$ACTION_LOG" 2>/dev/null | grep -c '"action_type":"notify"' || echo "0"
 }
 
 DAILY_NOTIFY_COUNT=$(get_daily_notify_count)
@@ -169,7 +170,7 @@ process_due_reminders() {
       continue
     fi
     
-    trigger_epoch=$(date -u -d "$trigger_at" +%s 2>/dev/null || echo "")
+    trigger_epoch=$(_e=$(date_to_epoch "$trigger_at"); [[ "$_e" -gt 0 ]] 2>/dev/null && echo "$_e" || echo "")
     if [[ -z "$trigger_epoch" ]]; then
       echo "$line" >> "$tmp_reminders"
       continue
@@ -301,7 +302,7 @@ Return ONLY the JSON, no explanation.
 PROMPT
 }
 
-CLASSIFICATION_MODEL="${CLASSIFICATION_MODEL:-$(aie_get "models.classification" "google/gemini-2.5-flash")}"
+CLASSIFICATION_MODEL="${CLASSIFICATION_MODEL:-$(aie_get "models.classification" "google/gemini-3-flash-preview")}"
 log "Building classification prompt for $INSIGHT_COUNT insights..."
 
 CLASSIFICATION_PROMPT=$(build_classification_prompt "$INSIGHTS_JSON")
@@ -551,7 +552,7 @@ execute_remind() {
   fi
   
   # Validate it's a valid datetime
-  if ! date -u -d "$trigger_at" +%s &>/dev/null; then
+  if [[ "$(date_to_epoch "$trigger_at")" -le 0 ]] 2>/dev/null; then
     log "Invalid trigger_at datetime '$trigger_at', skipping: ${reminder:0:50}..."
     return 1
   fi

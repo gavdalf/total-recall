@@ -10,6 +10,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 
@@ -45,7 +46,7 @@ get_buffer_content_hash() {
   # FIX: Hash only the insight lines, stripping the timestamp header
   # so that unchanged insights don't look "new" just because the timestamp changed
   if [[ -f "$BUFFER_FILE" ]]; then
-    grep -E '^[🧠📋👁️🚨📝💭]' "$BUFFER_FILE" 2>/dev/null | sha256sum | awk '{print $1}'
+    grep -E '^[🧠📋👁️🚨📝💭]' "$BUFFER_FILE" 2>/dev/null | sha256_hash
   else
     echo "none"
   fi
@@ -101,12 +102,12 @@ main() {
   fi
 
   # FIX: Use flock to prevent concurrent runs from double-sending
-  exec 9>"$LOCK_FILE"
-  if ! flock -n 9; then
+  if ! portable_flock_try "$LOCK_FILE"; then
     log "Another instance is running. Skipping."
     log "=== Buffer inject END ==="
     exit 0
   fi
+  trap 'portable_flock_release "$LOCK_FILE"' EXIT
 
   local current_hash last_hash
   current_hash="$(get_buffer_content_hash)"

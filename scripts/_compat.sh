@@ -42,8 +42,327 @@ has_inotify() {
   command -v inotifywait &>/dev/null
 }
 
+# Check if fswatch is available (macOS file watcher)
+has_fswatch() {
+  command -v fswatch &>/dev/null
+}
+
 # Check if systemctl --user is available
 has_systemd_user() {
   command -v systemctl &>/dev/null && systemctl --user status &>/dev/null 2>&1
   return $?
+}
+
+# ─── Portable flock ──────────────────────────────────────────────────────────
+# macOS has no flock(1). We use mkdir as an atomic lock primitive.
+#
+# Usage — replaces the fd-redirect flock pattern:
+#   BEFORE:  ( flock -x 200; COMMANDS ) 200>"$LOCKFILE"
+#   AFTER:   portable_flock_exec "$LOCKFILE" COMMANDS
+#
+# For non-blocking (flock -n):
+#   portable_flock_try "$LOCKFILE"   → returns 0 if lock acquired, 1 if busy
+#   portable_flock_release "$LOCKFILE"
+# Helper: check and break stale lock if older than 5 minutes
+# Returns 0 if stale lock was removed, 1 if lock is fresh
+_check_stale_lock() {
+  local lockdir="$1"
+  local lock_age
+  if $_IS_MACOS; then
+    lock_age=$(( $(date +%s) - $(stat -f %m "$lockdir" 2>/dev/null || echo 0) ))
+  else
+    lock_age=$(( $(date +%s) - $(stat -c %Y "$lockdir" 2>/dev/null || echo 0) ))
+  fi
+  if [[ $lock_age -gt 300 ]]; then
+    rmdir "$lockdir" 2>/dev/null || true
+    return 0
+  fi
+  return 1
+}
+
+portable_flock_exec() {
+  local lockdir="$1.d"
+  shift
+  local wait_max="${PORTABLE_FLOCK_WAIT:-30}"
+  local waited=0
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    if _check_stale_lock "$lockdir"; then
+      continue
+    fi
+    sleep 0.2
+    waited=$(( waited + 1 ))
+    if [[ $waited -ge $(( wait_max * 5 )) ]]; then
+      echo "[_compat] WARN: lock timeout on $lockdir" >&2
+      return 1
+    fi
+  done
+  # shellcheck disable=SC2064
+  trap "rmdir $(printf '%q' "$lockdir") 2>/dev/null || true" RETURN
+  "$@"
+}
+
+# Non-blocking lock acquire (replaces flock -n)
+portable_flock_try() {
+  local lockdir="$1.d"
+  if mkdir "$lockdir" 2>/dev/null; then
+    return 0
+  fi
+  if _check_stale_lock "$lockdir"; then
+    mkdir "$lockdir" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+portable_flock_release() {
+  local lockdir="$1.d"
+  rmdir "$lockdir" 2>/dev/null || true
+}
+
+# ─── Portable timeout ────────────────────────────────────────────────────────
+# macOS has no coreutils timeout. Uses perl alarm as fallback.
+# Usage: portable_timeout SECONDS COMMAND [ARGS...]
+#        portable_timeout --kill-after=K SECONDS COMMAND [ARGS...]
+#
+# Uses background subshell + wait to enforce timeouts. Handles the common
+# pattern `env KEY=VAL... bash_function args` by converting `env` prefix
+# into inline variable exports inside a subshell, so bash functions remain
+# visible (external `env` binary cannot exec bash functions).
+portable_timeout() {
+  local kill_after=""
+  if [[ "$1" == --kill-after=* ]]; then
+    kill_after="${1#--kill-after=}"
+    shift
+  fi
+  local seconds="$1"
+  shift
+  # Strip trailing 's' if present (timeout accepts "30s")
+  seconds="${seconds%s}"
+
+  # If argv starts with "env KEY=VAL... CMD ARGS", convert to inline exports
+  # inside a subshell so bash functions are still reachable.
+  if [[ "$1" == "env" ]]; then
+    shift
+    local -a _pt_env_vars=()
+    while [[ $# -gt 0 && "$1" == *=* ]]; do
+      _pt_env_vars+=("$1")
+      shift
+    done
+    (
+      for _pt_v in "${_pt_env_vars[@]}"; do export "$_pt_v"; done
+      "$@"
+    ) &
+  else
+    "$@" &
+  fi
+  local child=$!
+
+  (
+    sleep "$seconds"
+    kill -TERM "$child" 2>/dev/null
+    if [[ -n "$kill_after" ]]; then
+      sleep "$kill_after"
+      kill -KILL "$child" 2>/dev/null
+    fi
+  ) &
+  local watcher=$!
+  wait "$child" 2>/dev/null
+  local rc=$?
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  # If killed by our watcher, return 124 (same as GNU timeout)
+  if (( rc == 143 )); then  # SIGTERM = 128+15
+    return 124
+  fi
+  return $rc
+}
+
+# ─── Portable date helpers ───────────────────────────────────────────────────
+
+# date_days_offset N — date N days from today (negative = past). Format: %Y-%m-%d
+date_days_offset() {
+  local n="$1"
+  if $_IS_MACOS; then
+    date -v "${n}d" '+%Y-%m-%d'
+  else
+    date -d "${n} days" '+%Y-%m-%d'
+  fi
+}
+
+# date_to_epoch "DATESTRING" — convert an ISO-ish date/datetime to epoch seconds
+# Handles: 2026-03-17T14:00:00Z, 2026-03-17T14:00:00+08:00, 2026-03-17T14:00:00-05:00, 2026-03-17
+date_to_epoch() {
+  local ds="$1"
+  if $_IS_MACOS; then
+    local bare="$ds" input_offset=0 has_tz=false
+    if [[ "$bare" == *Z ]]; then
+      bare="${bare%Z}"
+      has_tz=true
+    elif [[ "$bare" == *[+-][0-9][0-9]:[0-9][0-9] ]]; then
+      # Extract timezone suffix using parameter expansion (bash 3.2 compatible)
+      local tz_suffix="${bare:$(( ${#bare} - 6 ))}"  # last 6 chars: +08:00 or -05:00
+      local sign="${tz_suffix:0:1}"
+      local hh="${tz_suffix:1:2}"
+      local mm="${tz_suffix:4:2}"
+      bare="${bare%[+-][0-9][0-9]:[0-9][0-9]}"
+      input_offset=$(( 10#$hh * 3600 + 10#$mm * 60 ))
+      [[ "$sign" == "-" ]] && input_offset=$(( -input_offset ))
+      has_tz=true
+    fi
+    local epoch
+    if $has_tz; then
+      # Parse bare datetime as-if UTC, then subtract input timezone offset
+      epoch=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "$bare" '+%s' 2>/dev/null) || \
+      epoch=$(TZ=UTC date -j -f "%Y-%m-%d" "$bare" '+%s' 2>/dev/null) || \
+      { echo 0; return; }
+      echo $(( epoch - input_offset ))
+    else
+      # No timezone info — parse as local time
+      epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$bare" '+%s' 2>/dev/null) || \
+      epoch=$(date -j -f "%Y-%m-%d" "$bare" '+%s' 2>/dev/null) || \
+      { echo 0; return; }
+      echo "$epoch"
+    fi
+  else
+    date -d "$ds" '+%s' 2>/dev/null || echo 0
+  fi
+}
+
+# date_hours_ago N — ISO UTC timestamp N hours ago
+date_hours_ago() {
+  local n="$1"
+  if $_IS_MACOS; then
+    date -u -v "-${n}H" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -d "${n} hours ago" '+%Y-%m-%dT%H:%M:%SZ'
+  fi
+}
+
+# date_days_ago N — ISO UTC timestamp N days ago
+date_days_ago() {
+  local n="$1"
+  if $_IS_MACOS; then
+    date -u -v "-${n}d" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -d "${n} days ago" '+%Y-%m-%dT%H:%M:%SZ'
+  fi
+}
+
+# date_future_days N — date N days from today. Format: %Y-%m-%d
+date_future_days() {
+  local n="$1"
+  if $_IS_MACOS; then
+    date -v "+${n}d" '+%Y-%m-%d'
+  else
+    date -d "+${n} days" '+%Y-%m-%d'
+  fi
+}
+
+# ─── Portable SHA-256 ────────────────────────────────────────────────────────
+# SHA-256 hash of stdin (portable). macOS lacks sha256sum.
+sha256_hash() {
+  if command -v sha256sum &>/dev/null; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    openssl dgst -sha256 | sed 's/.*= //'
+  fi
+}
+
+# ─── Portable tac ────────────────────────────────────────────────────────────
+# Reverse lines of file(s). macOS lacks tac.
+portable_tac() {
+  if command -v tac &>/dev/null; then
+    tac "$@"
+  else
+    tail -r "$@"
+  fi
+}
+
+# ─── Portable realpath -m ────────────────────────────────────────────────────
+# Resolve path without requiring it to exist. macOS realpath lacks -m.
+portable_realpath_m() {
+  if realpath -m / &>/dev/null; then
+    realpath -m "$1"
+  else
+    python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$1" 2>/dev/null || echo "$1"
+  fi
+}
+
+# ─── Portable date → ISO UTC ────────────────────────────────────────────────
+# Normalize an ISO-ish datetime string to UTC ISO 8601. Returns "null" on failure.
+date_format_iso_utc() {
+  local epoch
+  epoch=$(date_to_epoch "$1")
+  if [[ "$epoch" -gt 0 ]] 2>/dev/null; then
+    if $_IS_MACOS; then
+      date -u -r "$epoch" '+%Y-%m-%dT%H:%M:%SZ'
+    else
+      date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "null"
+    fi
+  else
+    echo "null"
+  fi
+}
+
+# ─── Portable jq ascii_upcase ────────────────────────────────────────────────
+# jq < 1.7 lacks ascii_upcase. This helper pipes through tr as fallback.
+# Usage: echo "$json" | jq_upcase_compat '.field'
+#   Returns the value of .field uppercased.
+_jq_has_ascii_upcase=""
+jq_check_ascii_upcase() {
+  if [[ -z "$_jq_has_ascii_upcase" ]]; then
+    if echo '""' | jq -e '"a" | ascii_upcase' &>/dev/null; then
+      _jq_has_ascii_upcase=yes
+    else
+      _jq_has_ascii_upcase=no
+    fi
+  fi
+}
+
+# Uppercase a string value — use in pipe: echo "value" | portable_upcase
+portable_upcase() {
+  tr '[:lower:]' '[:upper:]'
+}
+
+# ─── Safe .env file loader ──────────────────────────────────────────────────
+# Reads KEY=VALUE lines from a .env file without eval or source.
+# Strips surrounding quotes, skips comments and blank lines.
+# Usage: safe_load_env "/path/to/.env"
+safe_load_env() {
+  local envfile="$1"
+  [[ -f "$envfile" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    [[ "$line" =~ ^([A-Za-z_][A-Za-z_0-9]*)=(.*)$ ]] || continue
+    local key="${BASH_REMATCH[1]}"
+    local val="${BASH_REMATCH[2]}"
+    if [[ "$val" =~ ^\"(.*)\"$ ]]; then val="${BASH_REMATCH[1]}"; fi
+    if [[ "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
+    export "$key=$val"
+  done < "$envfile"
+}
+
+# ─── Path traversal guard ───────────────────────────────────────────────────
+# Validate that a relative path resolves within an allowed directory.
+# Usage: require_path_under "label" "relative_path" "allowed_dir" ["base_dir"]
+# base_dir defaults to allowed_dir. Returns 0 if safe, 1 with error on stderr.
+require_path_under() {
+  local label="$1" filepath="$2" allowed_dir="$3" base_dir="${4:-$3}"
+  local resolved
+  resolved="$(cd "$base_dir" 2>/dev/null && portable_realpath_m "$filepath" 2>/dev/null || true)"
+  if [[ -z "$resolved" ]]; then
+    echo "ERROR: Cannot resolve $label path: $filepath" >&2
+    return 1
+  fi
+  local real_allowed
+  real_allowed="$(portable_realpath_m "$allowed_dir" 2>/dev/null || echo "$allowed_dir")"
+  case "$resolved" in
+    "$real_allowed"/*|"$real_allowed") return 0 ;;
+    *)
+      echo "ERROR: $label path must be inside $real_allowed — got: $filepath (resolved: $resolved)" >&2
+      return 1
+      ;;
+  esac
 }

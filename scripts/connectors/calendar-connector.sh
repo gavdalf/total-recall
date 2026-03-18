@@ -6,8 +6,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
+source "$SCRIPT_DIR/google-api.sh"
 
 BUS="$(aie_get "paths.events_bus" "$AIE_WORKSPACE/memory/events/bus.jsonl")"
 BUS_LOCK="${BUS}.lock"
@@ -28,6 +30,10 @@ for arg in "$@"; do
   [[ "$arg" == "--dry-run" ]] && DRY_RUN="true"
 done
 
+log() {
+  echo "[calendar] $*"
+}
+
 if ! aie_bool "connectors.calendar.enabled"; then
   log "SKIP disabled in config"
   exit 0
@@ -38,17 +44,18 @@ if [[ -z "$CALENDAR_ACCOUNT" || -z "$KEYRING_PASSWORD" ]]; then
   exit 0
 fi
 
-log() {
-  echo "[calendar] $*"
-}
-
 health_check() {
-  if ! GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
-      gog calendar events "$CALENDAR_ID" --days 1 --max 1 --json >/dev/null 2>&1; then
-    log "ERROR: health_check failed — gog calendar not reachable (auth expiry?)"
-    exit 1
-  fi
-  log "health_check OK"
+  local attempt
+  for attempt in 1 2 3; do
+    if GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
+        gapi_calendar_events "$CALENDAR_ID" --days 1 --max 1 --json >/dev/null 2>&1; then
+      log "health_check OK (attempt $attempt)"
+      return 0
+    fi
+    [[ $attempt -lt 3 ]] && sleep 2
+  done
+  log "ERROR: health_check failed after 3 attempts — calendar API not reachable (auth expiry?)"
+  exit 1
 }
 
 emit_event() {
@@ -67,8 +74,9 @@ emit_event() {
       expires_at: (if $expires_at == "null" then null else $expires_at end),
       importance: $importance, actionable: $actionable,
       payload: $payload, consumed: false, consumer_watermark: null}')
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    ( flock -x 200; echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"
+    portable_flock_exec "$BUS_LOCK" _emit_to_bus
     log "Emitted: $type → $id"
   else
     log "[DRY-RUN] Would emit: $type | $(echo "$payload" | jq -r '.title // "?"') @ $(echo "$payload" | jq -r '.start // "?"')"
@@ -86,7 +94,7 @@ PREV_STATE="{}"
 
 # Fetch events for next 48 hours (--days 2)
 RAW=$(GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
-      gog calendar events "$CALENDAR_ID" --days "$LOOKAHEAD_DAYS" --max "$MAX_EVENTS" --json 2>/dev/null || echo '{"events":[]}')
+      gapi_calendar_events "$CALENDAR_ID" --days "$LOOKAHEAD_DAYS" --max "$MAX_EVENTS" --json 2>/dev/null || echo '{"events":[]}')
 
 # Handle both array and object wrapper formats
 EVENTS=$(echo "$RAW" | jq -c 'if type == "array" then .[] else .events[]? end' 2>/dev/null || echo "")
@@ -113,12 +121,12 @@ while IFS= read -r ev; do
   ev_status=$(echo "$ev" | jq -r '.status // "confirmed"')
 
   # Create a content hash for change detection
-  ev_hash=$(echo "${ev_title}|${ev_start}|${ev_end}|${ev_location}|${ev_status}" | md5sum | cut -d' ' -f1)
+  ev_hash=$(echo "${ev_title}|${ev_start}|${ev_end}|${ev_location}|${ev_status}" | md5_hash)
 
   # Hours until event starts
   hours_until=999
   if [[ -n "$ev_start" ]]; then
-    ev_start_epoch=$(date -d "$ev_start" +%s 2>/dev/null || echo 0)
+    ev_start_epoch=$(date_to_epoch "$ev_start")
     if [[ "$ev_start_epoch" -gt 0 ]]; then
       hours_until=$(( (ev_start_epoch - NOW_EPOCH) / 3600 ))
     fi
@@ -176,7 +184,7 @@ while IFS= read -r ev; do
   # Expires_at = event start time (event becomes irrelevant once it starts)
   expires_at="null"
   if [[ -n "$ev_end" ]]; then
-    expires_at=$(date -u -d "$ev_end" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "null")
+    expires_at=$(date_format_iso_utc "$ev_end")
   fi
 
   emit_event "$bus_id" "$event_type" "$importance" "true" "$payload" "$expires_at"

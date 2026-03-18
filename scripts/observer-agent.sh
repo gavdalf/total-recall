@@ -16,10 +16,10 @@ SESSIONS_DIR="${SESSIONS_DIR:-$HOME/.openclaw/agents/main/sessions}"
 # LLM provider configuration (OpenAI-compatible APIs)
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
+LLM_MODEL="${LLM_MODEL:-google/gemini-3-flash-preview}"
 
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
-OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-google/gemini-2.5-flash}"
+OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-deepseek/deepseek-v3.2}"
 OBSERVER_LOOKBACK_MIN="${OBSERVER_LOOKBACK_MIN:-15}"
 OBSERVER_MORNING_LOOKBACK_MIN="${OBSERVER_MORNING_LOOKBACK_MIN:-480}"
 REFLECTOR_WORD_THRESHOLD="${REFLECTOR_WORD_THRESHOLD:-8000}"
@@ -31,18 +31,13 @@ MARKER_FILE="$MEMORY_DIR/.observer-last-run"
 HASH_FILE="$MEMORY_DIR/.observer-last-hash"
 LOCK_FILE="$WORKSPACE/logs/reflector.lock"
 
-# Source env if available (grep-guard: only export KEY=VALUE lines)
-if [ -f "$WORKSPACE/.env" ]; then
-  set -a
-  # Load provider config + backward compatible OPENROUTER key
-  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY)=' "$WORKSPACE/.env" 2>/dev/null)" || true
-  set +a
-fi
+# Source env safely
+safe_load_env "$WORKSPACE/.env"
 
 # Re-apply defaults after env load
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
+LLM_MODEL="${LLM_MODEL:-google/gemini-3-flash-preview}"
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
 
 mkdir -p "$WORKSPACE/logs" "$MEMORY_DIR"
@@ -104,7 +99,7 @@ elif [ "${1:-}" = "--flush" ]; then
   FIND_MIN=125
   log "FLUSH MODE: pre-compaction emergency capture (2hr lookback)"
 else
-  HOUR=$(date +%H)
+  HOUR=$((10#$(date +%H)))
   if [ "$HOUR" -le 7 ]; then
     LOOKBACK_MIN="$OBSERVER_MORNING_LOOKBACK_MIN"
     FIND_MIN=$(( OBSERVER_MORNING_LOOKBACK_MIN + 10 ))

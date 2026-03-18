@@ -9,10 +9,12 @@ set -uo pipefail
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
 source "$SCRIPT_DIR/aie-tools.sh"
+source "$SCRIPT_DIR/google-api.sh"
 
 # Normalize LLM provider vars (LLM_API_KEY preferred; OPENROUTER_API_KEY backward-compatible)
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
@@ -29,7 +31,7 @@ WATERMARK_FILE="$AIE_MEMORY_DIR/.rumination-watermark"
 LAST_RUN_FILE="$AIE_MEMORY_DIR/.rumination-last-run"
 COOLDOWN_SECONDS="$(aie_get "thresholds.rumination_cooldown_seconds" "1800")"
 STALENESS_SECONDS="$(aie_get "thresholds.rumination_staleness_seconds" "14400")"
-RUMINATION_MODEL="$(aie_get "models.rumination" "google/gemini-2.5-flash")"
+RUMINATION_MODEL="$(aie_get "models.rumination" "google/gemini-3-flash-preview")"
 HTTP_REFERER="$(aie_get "api.http_referer" "https://github.com/gavdalf/total-recall")"
 ASSISTANT_NAME="$(aie_get "profile.assistant_name" "the assistant")"
 PRIMARY_USER_NAME="$(aie_get "profile.primary_user_name" "the user")"
@@ -134,8 +136,10 @@ UPCOMING_FROM_BUS=$(echo "$UNPROCESSED_JSON" | jq -r \
   '.[] | select(.source == "calendar") | "- \(.payload.title) (\(.payload.hours_until // "?")h away)"' \
   2>/dev/null | head -8 || echo "")
 
-# Also try gog calendar for fresh data
-UPCOMING_CAL=$(timeout 10 gog calendar list --days 2 --json 2>/dev/null | \
+# Also try calendar API for fresh data (with auth env)
+UPCOMING_CAL=$(portable_timeout 10 env \
+  GOG_KEYRING_PASSWORD="$CALENDAR_KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
+  gapi_calendar_events "primary" --days 2 --json 2>/dev/null | \
   jq -r '.[] | "- \(.summary) at \(.start.dateTime // .start.date)"' 2>/dev/null | head -8 || echo "")
 UPCOMING="${UPCOMING_FROM_BUS:-$UPCOMING_CAL}"
 [[ -z "$UPCOMING" ]] && UPCOMING="None detected"
@@ -158,7 +162,7 @@ EVENTS_SUMMARY=$(echo "$UNPROCESSED_JSON" | jq -r \
 # Last 72h rumination notes for deduplication
 RECENT_NOTES=""
 for i in 0 1 2; do
-  DAY_OFFSET=$(date -d "-${i} days" +%Y-%m-%d 2>/dev/null || echo "")
+  DAY_OFFSET=$(date_days_offset "-${i}" 2>/dev/null || echo "")
   if [[ -n "$DAY_OFFSET" ]]; then
     PREV_RUM="$RUMINATION_DIR/${DAY_OFFSET}.jsonl"
     if [[ -f "$PREV_RUM" ]]; then
@@ -189,7 +193,8 @@ if [[ "$TIME_PERIOD" == "early_morning" || "$TIME_PERIOD" == "morning" ]]; then
 fi
 
 # ─── Build prompt ────────────────────────────────────────────────────────────
-PROMPT=$(cat << PROMPT_EOF
+# read -d '' returns 1 on EOF (no null byte in heredoc); harmless without set -e
+IFS= read -r -d '' PROMPT << PROMPT_EOF
 You are the Rumination Engine for ${ASSISTANT_NAME}, the inner cognitive process of an AI assistant supporting ${PRIMARY_USER_NAME} and ${HOUSEHOLD_CONTEXT}. ${ASSISTANT_NAME} is sharp, warm, emotionally intelligent, and attentive to what matters.
 
 Your job is NOT to summarise events. Your job is to THINK about them: find non-obvious connections, notice what was not actioned, sense what matters emotionally, and surface insights that would feel genuinely perceptive.
@@ -276,7 +281,7 @@ Respond with ONLY valid JSON, no markdown, no explanation:
   "monologue_fragment": "${ASSISTANT_NAME}'s private inner voice — honest, in-character, 1-3 sentences"
 }
 PROMPT_EOF
-)
+PROMPT="${PROMPT%$'\n'}"
 
 log "Calling LLM (model: $RUMINATION_MODEL)..."
 
@@ -453,9 +458,14 @@ log "Cycle state loaded ($(echo "$CYCLE_STATE" | jq '.lookups | length' 2>/dev/n
 CANDIDATE_ACTIONS="[]"
 ALLOWED_TOOLS="calendar_lookup gmail_search gmail_read ionos_search todoist_query weather fitbit_data github_status openrouter_balance web_search places_lookup"
 
-NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
+jq_check_ascii_upcase
+if [[ "$_jq_has_ascii_upcase" == "yes" ]]; then
+  NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
+else
+  NOTES_FOR_CLASS=$(echo "$RUMINATION_NOTES" | jq -r '.[] | "[\(.thread | explode | map(if . >= 97 and . <= 122 then . - 32 else . end) | implode)] [importance=\(.importance)] \(.content)"' 2>/dev/null | head -30)
+fi
 
-CLASS_PROMPT=$(cat << CLASS_EOF
+IFS= read -r -d '' CLASS_PROMPT << CLASS_EOF
 You are the classification layer of an AI assistant. Given a set of rumination insights, decide which (if any) real-time lookups would meaningfully enrich them.
 
 ## Available tools
@@ -485,7 +495,7 @@ You are the classification layer of an AI assistant. Given a set of rumination i
 Respond with ONLY valid JSON:
 {"actions": [{"tool": "...", "query": "...", "reason": "...", "importance": 0.7}]}
 CLASS_EOF
-)
+CLASS_PROMPT="${CLASS_PROMPT%$'\n'}"
 
 # Append the actual insights
 CLASS_PROMPT="${CLASS_PROMPT}
@@ -569,7 +579,7 @@ for i in $(seq 0 $((CANDIDATE_COUNT - 1))); do
   RESULT_JSON=$(run_tool "$TOOL" "$QUERY" "$BUDGET_REMAINING" 2>/dev/null || echo '{"status":"error","error":"run_tool_failed"}')
   RESULT_STATUS=$(echo "$RESULT_JSON" | jq -r '.status // "error"' 2>/dev/null || echo "error")
   RESULT_OUTPUT=$(echo "$RESULT_JSON" | jq -r '.output // ""' 2>/dev/null || echo "")
-  RESULT_HASH=$(echo "$RESULT_OUTPUT" | head -c 500 | md5sum | cut -d' ' -f1)
+  RESULT_HASH=$(echo "$RESULT_OUTPUT" | head -c 500 | md5_hash)
   STATUS="new"
 
   if [[ -n "$PREV_ENTRY" ]]; then
@@ -626,7 +636,7 @@ if [[ "$DRY_RUN" != "true" && "$EXEC_COUNT" -gt 0 ]]; then
     '.[] | "[\(.tool)] query=\(.query)\nResult: \(.result | .[0:400])\nStatus: \(.status)\n"' \
     2>/dev/null | head -60 || echo "")
 
-  ENRICH_PROMPT=$(cat << 'ENRICH_EOF'
+  IFS= read -r -d '' ENRICH_PROMPT << 'ENRICH_EOF'
 You are the enrichment layer of an AI assistant. You have rumination insights from an earlier thinking pass, plus fresh real-time data from lookups. Your task is to ENRICH the insights with the new data — not to rewrite them wholesale.
 
 Rules:
@@ -640,7 +650,7 @@ Rules:
 Respond with ONLY valid JSON:
 {"rumination_notes": [...enriched notes array...]}
 ENRICH_EOF
-)
+  ENRICH_PROMPT="${ENRICH_PROMPT%$'\n'}"
 
   ENRICH_PROMPT="${ENRICH_PROMPT}
 
@@ -785,7 +795,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
   fi
 
   # ── Step 4: Prune delivered markers older than 30 days ──
-  PRUNE_CUTOFF=$(date -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+  PRUNE_CUTOFF=$(date_days_ago 30 2>/dev/null || echo "")
   if [[ -n "$PRUNE_CUTOFF" && -f "$FOLLOWUPS_FILE" ]]; then
     TMP_PRUNE=$(mktemp "${FOLLOWUPS_FILE}.prune.XXXXXX")
     jq -c --arg cutoff "$PRUNE_CUTOFF" '
@@ -838,7 +848,19 @@ if [[ "$DRY_RUN" == "true" ]]; then
   echo "   $MONOLOGUE"
   echo ""
   echo "📝 Rumination Notes:"
-  echo "$RUMINATION_NOTES" | jq -r '.[] | "   [\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)\n   tags: \(.tags | join(", "))\n   expires: \(.expires // "never")\n"'
+  # Use jq filter file to avoid shell quoting issues
+  _JQ_FILTER_FILE=$(mktemp /tmp/rum-jq.XXXXXX)
+  if [[ "$_jq_has_ascii_upcase" == "yes" ]]; then
+    cat > "$_JQ_FILTER_FILE" << '_JQ_EOF'
+.[] | "   [\(.thread | ascii_upcase)] [importance=\(.importance)] \(.content)\n   tags: \(.tags | join(", "))\n   expires: \(.expires // "never")\n"
+_JQ_EOF
+  else
+    cat > "$_JQ_FILTER_FILE" << '_JQ_EOF'
+.[] | "   [\(.thread | explode | map(if . >= 97 and . <= 122 then . - 32 else . end) | implode)] [importance=\(.importance)] \(.content)\n   tags: \(.tags | join(", "))\n   expires: \(.expires // "never")\n"
+_JQ_EOF
+  fi
+  echo "$RUMINATION_NOTES" | jq -rf "$_JQ_FILTER_FILE"
+  rm -f "$_JQ_FILTER_FILE"
   echo "════════════════════════════════════════════════════════════"
   log "Dry run complete. No files written."
 else
@@ -861,14 +883,19 @@ else
     # Build a JSON array of the exact event IDs we processed
     PROCESSED_IDS_JSON=$(echo "$SOURCE_IDS" | tr ',' '\n' | jq -Rn '[inputs | select(length > 0)]')
     TMP_BUS=$(mktemp "${BUS}.tmp.XXXXXX")
-    (
-      flock -x 200
-      jq -c \
+    _mark_consumed() {
+      if jq -c \
         --argjson processed_ids "$PROCESSED_IDS_JSON" \
-        'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = "'"$RUN_ID"'" else . end' \
-        "$BUS" > "$TMP_BUS"
-      mv "$TMP_BUS" "$BUS"
-    ) 200>"$BUS_LOCK"
+        --arg run_id "$RUN_ID" \
+        'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = $run_id else . end' \
+        "$BUS" > "$TMP_BUS" && [[ -s "$TMP_BUS" ]]; then
+        mv "$TMP_BUS" "$BUS"
+      else
+        rm -f "$TMP_BUS"
+        echo "[rumination] WARN: jq mark-consumed failed, bus unchanged" >&2
+      fi
+    }
+    portable_flock_exec "$BUS_LOCK" _mark_consumed
     log "Marked $EVENT_COUNT events as consumed in bus (exact IDs matched)"
   fi
 
@@ -888,7 +915,7 @@ else
   # Trigger preconscious selection
   PRECONSCIOUS_SCRIPT="$SCRIPT_DIR/preconscious-select.sh"
   if [[ -f "$PRECONSCIOUS_SCRIPT" ]]; then
-    timeout 90 bash "$PRECONSCIOUS_SCRIPT" >> "$LOG" 2>&1 || log "WARN: preconscious-select trigger failed"
+    portable_timeout 90 bash "$PRECONSCIOUS_SCRIPT" >> "$LOG" 2>&1 || log "WARN: preconscious-select trigger failed"
   fi
 fi
 

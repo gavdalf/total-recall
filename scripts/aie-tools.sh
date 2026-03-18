@@ -12,17 +12,18 @@ fi
 readonly AIE_TOOLS_SH_LOADED=1
 
 # ─── Bootstrap aie-config if not already loaded ──────────────────────────────
+_AIE_TOOLS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_AIE_TOOLS_SCRIPT_DIR/_compat.sh"
 if [[ -z "${AIE_CONFIG_SH_LOADED:-}" ]]; then
-  _AIE_TOOLS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   source "$_AIE_TOOLS_SCRIPT_DIR/aie-config.sh"
   aie_init
   aie_load_env
 fi
 
 # ─── Load config variables (only if not already set by caller) ───────────────
-: "${MODEL:=$(aie_get "models.rumination" "google/gemini-2.5-flash")}"
-: "${CLASSIFICATION_MODEL:=$(aie_get "models.classification" "google/gemini-2.5-flash")}"
-: "${ENRICHMENT_MODEL:=$(aie_get "models.enrichment" "google/gemini-2.5-flash")}"
+: "${MODEL:=$(aie_get "models.rumination" "google/gemini-3-flash-preview")}"
+: "${CLASSIFICATION_MODEL:=$(aie_get "models.classification" "google/gemini-3-flash-preview")}"
+: "${ENRICHMENT_MODEL:=$(aie_get "models.enrichment" "google/gemini-3-flash-preview")}"
 : "${HTTP_REFERER:=$(aie_get "api.http_referer" "https://github.com/gavdalf/total-recall")}"
 : "${GMAIL_ACCOUNT:=$(aie_get "connectors.gmail.account" "")}"
 : "${GMAIL_KEYRING_PASSWORD:=$(aie_get "connectors.gmail.keyring_password" "")}"
@@ -45,6 +46,9 @@ export CALENDAR_ACCOUNT CALENDAR_KEYRING_PASSWORD
 export IONOS_ACCOUNT WEATHER_URL HEALTH_DATA_DIR WEB_SEARCH_SCRIPT
 export PLACES_ENABLED PLACES_LAT PLACES_LNG PLACES_LIMIT
 export MAX_ACTIONS ACTION_BUDGET_SECONDS
+
+# ─── Load Google API abstraction ──────────────────────────────────────────────
+source "$_AIE_TOOLS_SCRIPT_DIR/google-api.sh"
 
 # ─── Global token counter (set by call_openrouter) ───────────────────────────
 TOKENS_USED=0
@@ -113,7 +117,7 @@ call_openrouter() {
   local temperature="${3:-0.3}"
   local title="${4:-AIE Call}"
   local model_override="${5:-}"
-  local call_model="${model_override:-${MODEL:-google/gemini-2.5-flash}}"
+  local call_model="${model_override:-${MODEL:-google/gemini-3-flash-preview}}"
 
   if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
     echo "[call_openrouter] ERROR: OPENROUTER_API_KEY not set" >&2
@@ -175,7 +179,7 @@ run_timed_capture() {
 
   local start end elapsed status output
   start=$(date +%s)
-  output=$(timeout "$timeout_s" "$@" 2>&1)
+  output=$(portable_timeout "$timeout_s" "$@" 2>&1)
   status=$?
   end=$(date +%s)
   elapsed=$((end - start))
@@ -237,14 +241,14 @@ run_tool() {
         to=$(echo "$query" | awk -F'|' '{print $2}')
       fi
       [[ -z "$from" ]] && from="$(date +%Y-%m-%d)"
-      [[ -z "$to" ]] && to="$(date -d '+2 days' +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d)"
+      [[ -z "$to" ]] && to="$(date_future_days 2 2>/dev/null || date +%Y-%m-%d)"
       if [[ -z "$CALENDAR_ACCOUNT" || -z "$CALENDAR_KEYRING_PASSWORD" ]]; then
         echo '{"status":"error","error":"calendar_lookup_not_configured"}'
       else
         run_timed_capture "$effective_timeout" 2000 env \
           GOG_KEYRING_PASSWORD="$CALENDAR_KEYRING_PASSWORD" \
           GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
-          gog calendar events "$(aie_get "connectors.calendar.calendar_id" "primary")" --from "$from" --to "$to"
+          gapi_calendar_events "$(aie_get "connectors.calendar.calendar_id" "primary")" --from "$from" --to "$to"
       fi
       ;;
     gmail_search)
@@ -255,7 +259,7 @@ run_tool() {
         run_timed_capture "$effective_timeout" 2000 env \
           GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" \
           GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-          gog gmail search "$query" --limit 5
+          gapi_gmail_search "$query" --limit 5
       fi
       ;;
     gmail_read)
@@ -266,7 +270,7 @@ run_tool() {
         run_timed_capture "$effective_timeout" 3000 env \
           GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" \
           GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-          gog gmail get "$query"
+          gapi_gmail_get "$query"
       fi
       ;;
     ionos_search)
@@ -279,7 +283,7 @@ run_tool() {
       if ! echo "$_ionos_q" | grep -qiE '\b(subject|body|from|to|date|before|after|flag)\b'; then
         _ionos_q="subject $_ionos_q or body $_ionos_q"
       fi
-      run_timed_capture "$effective_timeout" 2000 bash -c 'himalaya envelope list --account "$1" --page-size 5 -- $2 order by date desc 2>&1 | sed "s/\x1b\[[0-9;]*m//g"' _ "$IONOS_ACCOUNT" "$_ionos_q"
+      run_timed_capture "$effective_timeout" 2000 bash -c 'himalaya envelope list --account "$1" --page-size 5 -- "$2" order by date desc 2>&1 | sed "s/\x1b\[[0-9;]*m//g"' _ "$IONOS_ACCOUNT" "$_ionos_q"
       ;;
     todoist_query)
       effective_timeout=$(cap_timeout 10 "$remaining_budget")
@@ -293,6 +297,8 @@ run_tool() {
       effective_timeout=$(cap_timeout 5 "$remaining_budget")
       if [[ "$(aie_get "ambient_actions.tool_settings.fitbit_data.enabled" "true")" != "true" ]]; then
         echo '{"status":"error","error":"fitbit_data_disabled"}'
+      elif [[ ! "$query" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo '{"status":"error","error":"fitbit_data_invalid_query"}'
       else
         run_timed_capture "$effective_timeout" 2000 bash -lc 'cat "$0/$1.json"' "$HEALTH_DATA_DIR" "$query"
       fi
@@ -379,7 +385,7 @@ run_tool() {
       local _li_cache="/tmp/linkedin-messages.json"
       # Try to read from Mac Studio via openclaw node invoke
       local _li_result
-      _li_result=$(timeout "$effective_timeout" openclaw nodes invoke \
+      _li_result=$(portable_timeout "$effective_timeout" openclaw nodes invoke \
         --node "Mac Studio" \
         --command system.run \
         --params "{\"command\": [\"cat\", \"$_li_cache\"]}" \

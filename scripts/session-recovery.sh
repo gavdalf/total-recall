@@ -23,14 +23,14 @@ log "Session recovery check starting"
 
 # Find most recent session file (filter out subagent/cron/topic)
 LAST_SESSION=""
-for f in $(find "$SESSIONS_DIR" -maxdepth 1 -name "*.jsonl" -type f 2>/dev/null | sort -r); do
+while IFS= read -r f; do
   BASENAME=$(basename "$f" .jsonl)
   if echo "$BASENAME" | grep -qE "(topic|subagent|cron)"; then
     continue
   fi
   LAST_SESSION="$f"
   break
-done
+done < <(find "$SESSIONS_DIR" -maxdepth 1 -name "*.jsonl" -type f 2>/dev/null | sort -r)
 
 if [ -z "$LAST_SESSION" ]; then
   log "No main session files found"

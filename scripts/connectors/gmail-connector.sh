@@ -6,8 +6,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
+source "$SCRIPT_DIR/google-api.sh"
 
 BUS="$(aie_get "paths.events_bus" "$AIE_WORKSPACE/memory/events/bus.jsonl")"
 BUS_LOCK="${BUS}.lock"
@@ -28,7 +30,7 @@ SCORING_CACHE_THRESHOLD="$(aie_get "connectors.scoring.cache_threshold" "3")"
 
 HTTP_REFERER="$(aie_get "api.http_referer" "")"
 
-GOG_TIMEOUT_SEC=40
+GOG_TIMEOUT_SEC=15
 CURL_TIMEOUT_SEC=45
 LOCK_WAIT_SEC=10
 
@@ -41,11 +43,7 @@ log() { echo "[gmail] $*"; }
 run_timeout() {
   local seconds="$1"
   shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --kill-after=5 "${seconds}s" "$@"
-  else
-    "$@"
-  fi
+  portable_timeout --kill-after=5 "$seconds" "$@"
 }
 
 TMP_FILES=()
@@ -148,12 +146,17 @@ if ! [[ "$GMAIL_MAX_MESSAGES" =~ ^[0-9]+$ ]] || ((GMAIL_MAX_MESSAGES < 1)); then
 fi
 
 health_check() {
-  if ! run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-    gog gmail messages search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
-    log "ERROR: health_check failed — gog gmail unreachable"
-    return 1
-  fi
-  log "health_check OK"
+  local attempt
+  for attempt in 1 2 3; do
+    if run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
+      gapi_gmail_messages_search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
+      log "health_check OK (attempt $attempt)"
+      return 0
+    fi
+    [[ $attempt -lt 3 ]] && sleep 2
+  done
+  log "ERROR: health_check failed after 3 attempts — gmail API unreachable"
+  return 1
 }
 
 emit_event() {
@@ -166,8 +169,9 @@ emit_event() {
       expires_at: null, importance: $importance, actionable: true,
       payload: $payload, consumed: false, consumer_watermark: null}') || return 0
 
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    if ! ( flock -w "$LOCK_WAIT_SEC" -x 200 && echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"; then
+    if ! PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$BUS_LOCK" _emit_to_bus; then
       log "WARN: Failed to write event to bus (lock or IO error)"
       return 0
     fi
@@ -192,9 +196,10 @@ strip_html_to_text() {
   printf '%s' "$input" \
     | tr '\r' '\n' \
     | tr -d '\000' \
-    | sed -E 's/<(script|style)[^>]*>.*<\/\1>//gI' \
-    | sed -E 's/<br[[:space:]]*\/?[[:space:]]*>/\n/gI' \
-    | sed -E 's/<\/p>/\n/gI' \
+    | sed -E 's/<[Ss][Cc][Rr][Ii][Pp][Tt][^>]*>.*<\/[Ss][Cc][Rr][Ii][Pp][Tt]>//g' \
+    | sed -E 's/<[Ss][Tt][Yy][Ll][Ee][^>]*>.*<\/[Ss][Tt][Yy][Ll][Ee]>//g' \
+    | sed -E 's/<[Bb][Rr][[:space:]]*\/?[[:space:]]*>/\n/g' \
+    | sed -E 's/<\/[Pp]>/\n/g' \
     | sed -E 's/<[^>]+>/ /g' \
     | sed -E "s/&nbsp;/ /g; s/&amp;/\\&/g; s/&lt;/</g; s/&gt;/>/g; s/&quot;/\"/g; s/&#39;/'/g" \
     | awk 'NF{print}'
@@ -219,7 +224,7 @@ gmail_fetch_body_excerpt() {
   local body_candidate=""
 
   raw=$(run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-    gog gmail get "$msg_id" 2>/dev/null || true)
+    gapi_gmail_get "$msg_id" 2>/dev/null || true)
   raw=$(printf '%s' "$raw" | head -c 200000)
 
   if [[ -n "$raw" ]] && printf '%s' "$raw" | jq -e . >/dev/null 2>&1; then
@@ -330,16 +335,14 @@ persist_sender_cache_updates() {
     return 0
   fi
 
-  (
-    flock -w "$LOCK_WAIT_SEC" -x 201 || exit 1
-
+  _persist_cache() {
     local current sanitized merged
     current=$(load_json_object_file "$SENDER_CACHE_FILE")
     sanitized=$(sanitize_sender_cache "$current" "$SCORING_CACHE_THRESHOLD")
     merged=$(apply_cache_updates "$sanitized" "$updates_json")
-
     safe_write_json_atomic "$SENDER_CACHE_FILE" "$merged"
-  ) 201>"$SENDER_CACHE_LOCK"
+  }
+  PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$SENDER_CACHE_LOCK" _persist_cache
 }
 
 extract_llm_content_array() {
@@ -432,7 +435,7 @@ SENDER_CACHE=$(sanitize_sender_cache "$(load_json_object_file "$SENDER_CACHE_FIL
 CACHE_UPDATES='{}'
 
 EMAILS_RAW=$(run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-  gog gmail messages search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json 2>/dev/null || echo '{"messages":[]}')
+  gapi_gmail_messages_search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json --include-body 2>/dev/null || echo '{"messages":[]}')
 EMAILS=$(printf '%s' "$EMAILS_RAW" | jq -c '
   if type == "array" then
     .
@@ -473,7 +476,9 @@ while IFS= read -r email; do
       --arg date "$date_str" --arg domain "$domain" --arg gate "$gate" --argjson importance "$gate_score" \
       '{bus_id:$bus_id,msg_id:$msg_id,subject:$subject,from:$from,date:$date,domain:$domain,gate:$gate,importance:$importance}' >> "$TMP_ITEMS"
   else
-    body_excerpt=$(gmail_fetch_body_excerpt "$msg_id")
+    # Extract body from search results (--include-body), avoid per-email API call
+    body_raw=$(printf '%s' "$email" | jq -r 'try (.body // .body_plain // .snippet // "") catch ""' 2>/dev/null || true)
+    body_excerpt=$(printf '%s' "$body_raw" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | cut -c1-500)
     log "Gate1 miss -> Gate2 queued: $msg_id domain=${domain:-unknown}"
     jq -cn \
       --arg bus_id "$bus_id" --arg msg_id "$msg_id" --arg subject "$subject" --arg from "$from" \

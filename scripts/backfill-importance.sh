@@ -6,17 +6,14 @@
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "$SKILL_DIR/scripts/_compat.sh"
 WORKSPACE="${OPENCLAW_WORKSPACE:-$(cd "$SKILL_DIR/../.." && pwd)}"
 MEMORY_DIR="${WORKSPACE}/memory"
 OBSERVATIONS_FILE="${MEMORY_DIR}/observations.md"
 BACKUP_FILE="${OBSERVATIONS_FILE}.pre-backfill.bak"
 
-# Source env
-if [ -f "$WORKSPACE/.env" ]; then
-  set -a
-  eval "$(grep -E '^(ANTHROPIC_API_KEY)=' "$WORKSPACE/.env" 2>/dev/null)" || true
-  set +a
-fi
+# Source env safely
+safe_load_env "$WORKSPACE/.env"
 
 MODEL="${BACKFILL_MODEL:-claude-opus-4-20250918}"
 API_KEY="${ANTHROPIC_API_KEY:-}"
@@ -93,8 +90,9 @@ Do NOT tag:
 PAYLOAD=$(jq -n \
   --arg system "$SYSTEM_PROMPT" \
   --arg content "$CONTENT" \
+  --arg model "$MODEL" \
   '{
-    model: "claude-opus-4-20250918",
+    model: $model,
     max_tokens: 8192,
     messages: [
       {role: "user", content: ("Here is the observations file to tag. Output the complete file with metadata tags added:\n\n" + $content)}
@@ -140,8 +138,10 @@ if [ "$TAGGED_LINES" -lt $(( ORIGINAL_LINES / 2 )) ]; then
   exit 1
 fi
 
-# Write tagged output
-echo "$TAGGED" > "$OBSERVATIONS_FILE"
+# Write tagged output (atomic)
+BACKFILL_TMP="${OBSERVATIONS_FILE}.backfill.tmp"
+echo "$TAGGED" > "$BACKFILL_TMP"
+mv "$BACKFILL_TMP" "$OBSERVATIONS_FILE"
 
 echo "SUCCESS: $TAG_COUNT tags added across $TAGGED_LINES lines"
 echo "Backup at: $BACKUP_FILE"

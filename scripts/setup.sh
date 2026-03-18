@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Setup script for Total Recall
-# Creates directory structure and optionally installs watcher service (Linux)
+# Creates directory structure and optionally installs watcher service
+# Supports Linux (systemd + inotify) and macOS (launchd + fswatch)
 
 set -euo pipefail
 
@@ -24,17 +25,32 @@ MISSING=0
 for bin in jq curl; do
   if ! command -v "$bin" &>/dev/null; then
     echo "❌ Missing: $bin"
+    if $_IS_MACOS; then
+      echo "   Install with: brew install $bin"
+    else
+      echo "   Install with: sudo apt install $bin  (Debian/Ubuntu)"
+    fi
     MISSING=1
   fi
 done
 echo "Checking Python dependencies..."
 if ! command -v python3 &>/dev/null; then
-  echo "❌ Missing: python3"
+  echo "❌ Missing: python3 (3.9+ required)"
+  if $_IS_MACOS; then
+    echo "   Install with: brew install python3"
+  else
+    echo "   Install with: sudo apt install python3  (Debian/Ubuntu)"
+  fi
   MISSING=1
 elif ! python3 -c 'import yaml' &>/dev/null 2>&1; then
   echo "❌ Missing Python dependency: PyYAML"
-  echo "   Install with: sudo apt install python3-yaml  (Debian/Ubuntu)"
-  echo "   Or:           python3 -m pip install PyYAML"
+  if $_IS_MACOS; then
+    echo "   Install with: pip3 install PyYAML"
+    echo "   Or:           brew install libyaml && pip3 install PyYAML"
+  else
+    echo "   Install with: sudo apt install python3-yaml  (Debian/Ubuntu)"
+    echo "   Or:           python3 -m pip install PyYAML"
+  fi
   MISSING=1
 else
   echo "✅ python3 + PyYAML found"
@@ -46,13 +62,20 @@ if [ "$MISSING" -eq 1 ]; then
 fi
 echo "✅ Core dependencies found (jq, curl)"
 
-if has_inotify; then
-  echo "✅ inotifywait found (reactive watcher available)"
-else
-  echo "ℹ️  inotifywait not found — reactive watcher won't be available"
-  if $_IS_MACOS; then
-    echo "   This is expected on macOS. Cron-only mode works fine."
+# Check file watcher availability
+if $_IS_MACOS; then
+  if has_fswatch; then
+    echo "✅ fswatch found (reactive watcher available)"
   else
+    echo "ℹ️  fswatch not found — reactive watcher won't be available"
+    echo "   Install with: brew install fswatch"
+    echo "   Cron-only mode works fine without it."
+  fi
+else
+  if has_inotify; then
+    echo "✅ inotifywait found (reactive watcher available)"
+  else
+    echo "ℹ️  inotifywait not found — reactive watcher won't be available"
     echo "   Install: sudo apt install inotify-tools (Debian/Ubuntu)"
     echo "   Or: sudo dnf install inotify-tools (Fedora/RHEL)"
   fi
@@ -128,8 +151,65 @@ fi
 chmod +x "$SKILL_DIR/scripts/"*.sh
 echo "✅ Scripts made executable"
 
-# --- Install systemd watcher service (Linux only) ---
-if has_inotify && has_systemd_user; then
+# --- Install watcher service ---
+if $_IS_MACOS; then
+  # macOS: install LaunchAgent with fswatch
+  if has_fswatch; then
+    echo ""
+    echo "Installing reactive watcher LaunchAgent (macOS)..."
+    LAUNCHD_DIR="$HOME/Library/LaunchAgents"
+    PLIST_NAME="com.total-recall.watcher"
+    PLIST_FILE="$LAUNCHD_DIR/${PLIST_NAME}.plist"
+    mkdir -p "$LAUNCHD_DIR"
+
+    cat > "$PLIST_FILE" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${PLIST_NAME}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${SKILL_DIR}/scripts/observer-watcher.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OPENCLAW_WORKSPACE</key>
+    <string>${WORKSPACE}</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${WORKSPACE}/logs/observer-watcher.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>${WORKSPACE}/logs/observer-watcher.stderr.log</string>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+</dict>
+</plist>
+EOF
+
+    # Unload if already loaded, then load
+    launchctl bootout "gui/$(id -u)/$PLIST_NAME" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST_FILE" 2>/dev/null || true
+    echo "✅ Watcher LaunchAgent installed and loaded"
+  else
+    echo ""
+    echo "ℹ️  Skipping reactive watcher (fswatch not found)"
+    echo "   Install fswatch with: brew install fswatch"
+    echo "   The cron-based observer (every 15 min) provides full coverage without it."
+  fi
+elif has_inotify && has_systemd_user; then
+  # Linux: install systemd user service
   echo ""
   echo "Installing reactive watcher service..."
   SYSTEMD_DIR="$HOME/.config/systemd/user"
@@ -157,7 +237,12 @@ EOF
   echo "✅ Watcher service installed and started"
 else
   echo ""
-  echo "ℹ️  Skipping reactive watcher service (requires Linux + systemd + inotify-tools)"
+  echo "ℹ️  Skipping reactive watcher service"
+  if $_IS_MACOS; then
+    echo "   Install fswatch with: brew install fswatch"
+  else
+    echo "   Requires Linux + systemd + inotify-tools"
+  fi
   echo "   The cron-based observer (every 15 min) provides full coverage without it."
 fi
 
@@ -200,6 +285,8 @@ echo ""
 echo "Logs:"
 echo "  Observer:  tail -f $WORKSPACE/logs/observer.log"
 echo "  Reflector: tail -f $WORKSPACE/logs/reflector.log"
-if has_inotify && has_systemd_user; then
+if $_IS_MACOS && has_fswatch; then
+  echo "  Watcher:   launchctl print gui/$(id -u)/com.total-recall.watcher"
+elif has_inotify && has_systemd_user; then
   echo "  Watcher:   systemctl --user status total-recall-watcher"
 fi

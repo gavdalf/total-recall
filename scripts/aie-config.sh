@@ -62,10 +62,10 @@ defaults = {
         "http_referer": "https://github.com/gavdalf/total-recall",
     },
     "models": {
-        "rumination": "google/gemini-2.5-flash",
-        "classification": "google/gemini-2.5-flash",
-        "enrichment": "google/gemini-2.5-flash",
-        "ambient_actions": "google/gemini-2.5-flash",
+        "rumination": "google/gemini-3-flash-preview",
+        "classification": "google/gemini-3-flash-preview",
+        "enrichment": "google/gemini-3-flash-preview",
+        "ambient_actions": "google/gemini-3-flash-preview",
     },
     "connectors": {
         "high_importance_senders": [],  # empty by default; users add their own
@@ -146,6 +146,9 @@ defaults = {
             "max_alerts_per_day": 2,
         },
     },
+    "google_api": {
+        "cli": "gog",
+    },
     "ambient_actions": {
         "enabled": True,
         "max_actions": 5,
@@ -208,7 +211,7 @@ if os.path.exists(config_file):
         raise SystemExit("AIE config must be a YAML mapping at the top level")
     merge(config, loaded)
 
-today = __import__("datetime").datetime.now(__import__("datetime").UTC).strftime("%Y-%m-%d")
+today = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m-%d")
 config["workspace"] = os.path.abspath(os.path.expanduser(str(config.get("workspace") or workspace)))
 
 def expand_path(value, base_dir):
@@ -307,14 +310,11 @@ aie_bool() {
 }
 
 aie_load_env() {
-  if [[ -f "$AIE_ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    if ! source "$AIE_ENV_FILE" 2>/dev/null; then
-      echo "WARN: Failed to load $AIE_ENV_FILE; check shell syntax and variable references" >&2
-    fi
-    set +a
+  if ! declare -F safe_load_env &>/dev/null; then
+    echo "WARN: aie_load_env requires _compat.sh to be sourced first" >&2
+    return 1
   fi
+  safe_load_env "${AIE_ENV_FILE:-}"
 }
 
 aie_ensure_dirs() {

@@ -12,6 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 
@@ -52,8 +53,9 @@ emit_event() {
     '{id: $id, source: "fitbit", type: $type, timestamp: $timestamp,
       expires_at: $expires_at, importance: $importance, actionable: false,
       payload: $payload, consumed: false, consumer_watermark: null}')
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    ( flock -x 200; echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"
+    portable_flock_exec "$BUS_LOCK" _emit_to_bus
     log "Emitted: $type → $id"
   else
     log "[DRY-RUN] Would emit: $type | $(echo "$payload" | jq -c '.')"
@@ -71,7 +73,7 @@ for DAY in "$TODAY" "$YESTERDAY"; do
   [[ -f "$DATA_FILE" ]] || continue
 
   # Skip if already processed this version
-  FILE_HASH=$(md5sum "$DATA_FILE" 2>/dev/null | cut -d' ' -f1 || echo "")
+  FILE_HASH=$(md5_hash < "$DATA_FILE" 2>/dev/null || echo "")
   STATE_KEY="fitbit-${DAY}"
   PREV_HASH=$(echo "$PREV_STATE" | jq -r --arg k "$STATE_KEY" '.[$k] // ""')
   [[ "$FILE_HASH" == "$PREV_HASH" ]] && continue

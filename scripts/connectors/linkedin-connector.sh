@@ -7,6 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 
@@ -54,8 +55,9 @@ emit_event() {
       expires_at: null, importance: $importance, actionable: true,
       payload: $payload, consumed: false, consumer_watermark: null}') || return 0
 
+  _emit_to_bus() { echo "$event" >> "$BUS"; }
   if [[ -z "$DRY_RUN" ]]; then
-    if ! ( flock -w "$LOCK_WAIT_SEC" -x 200 && echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"; then
+    if ! PORTABLE_FLOCK_WAIT="$LOCK_WAIT_SEC" portable_flock_exec "$BUS_LOCK" _emit_to_bus; then
       log "WARN: Failed to write event to bus"
       return 0
     fi
@@ -139,7 +141,7 @@ while IFS= read -r msg; do
   unread=$(echo "$msg" | jq -r '.unread // false')
 
   # Create a stable ID from name+snippet
-  bus_id="linkedin-$(echo "${name}|${snippet}" | md5sum | cut -c1-16)"
+  bus_id="linkedin-$(echo "${name}|${snippet}" | md5_hash | cut -c1-16)"
 
   # Check if already processed
   prev=$(echo "$PREV_STATE" | jq -r --arg id "$bus_id" '.[$id] // empty' 2>/dev/null || true)
