@@ -11,6 +11,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_compat.sh"
 source "$SCRIPT_DIR/aie-config.sh"
 aie_init
 aie_load_env
@@ -133,7 +134,7 @@ MAX_REMIND=3
 # --- Check daily notify count from action log ---
 get_daily_notify_count() {
   local today_date="$TODAY"
-  grep -c "\"action_type\":\"notify\"" "$ACTION_LOG" 2>/dev/null | grep -o '[0-9]*' || echo "0"
+  grep "$today_date" "$ACTION_LOG" 2>/dev/null | grep -c '"action_type":"notify"' || echo "0"
 }
 
 DAILY_NOTIFY_COUNT=$(get_daily_notify_count)

@@ -183,9 +183,10 @@ strip_html_to_text() {
   printf '%s' "$input" \
     | tr '\r' '\n' \
     | tr -d '\000' \
-    | sed -E 's/<(script|style)[^>]*>.*<\/\1>//gI' \
-    | sed -E 's/<br[[:space:]]*\/?[[:space:]]*>/\n/gI' \
-    | sed -E 's/<\/p>/\n/gI' \
+    | sed -E 's/<[Ss][Cc][Rr][Ii][Pp][Tt][^>]*>.*<\/[Ss][Cc][Rr][Ii][Pp][Tt]>//g' \
+    | sed -E 's/<[Ss][Tt][Yy][Ll][Ee][^>]*>.*<\/[Ss][Tt][Yy][Ll][Ee]>//g' \
+    | sed -E 's/<[Bb][Rr][[:space:]]*\/?[[:space:]]*>/\n/g' \
+    | sed -E 's/<\/[Pp]>/\n/g' \
     | sed -E 's/<[^>]+>/ /g' \
     | sed -E "s/&nbsp;/ /g; s/&amp;/\\&/g; s/&lt;/</g; s/&gt;/>/g; s/&quot;/\"/g; s/&#39;/'/g" \
     | awk 'NF{print}'
@@ -221,7 +222,7 @@ ionos_fetch_message_headers() {
   [[ -z "$raw" ]] && { printf '{}\n'; return; }
 
   headers=$(printf '%s\n' "$raw" | awk 'BEGIN{done=0} {if(done==0){print}} /^$/{done=1; exit}')
-  unfolded=$(printf '%s\n' "$headers" | sed ':a;N;$!ba;s/\n[ \t]+/ /g')
+  unfolded=$(printf '%s\n' "$headers" | perl -0pe 's/\n[ \t]+/ /g')
 
   subject=$(parse_ionos_header_field "Subject" "$unfolded" | tr -d '\000' | cut -c1-200)
   from=$(parse_ionos_header_field "From" "$unfolded" | tr -d '\000' | cut -c1-180)

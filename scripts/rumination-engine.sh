@@ -886,7 +886,8 @@ else
     _mark_consumed() {
       if jq -c \
         --argjson processed_ids "$PROCESSED_IDS_JSON" \
-        'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = "'"$RUN_ID"'" else . end' \
+        --arg run_id "$RUN_ID" \
+        'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = $run_id else . end' \
         "$BUS" > "$TMP_BUS" && [[ -s "$TMP_BUS" ]]; then
         mv "$TMP_BUS" "$BUS"
       else

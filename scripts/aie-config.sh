@@ -310,14 +310,11 @@ aie_bool() {
 }
 
 aie_load_env() {
-  if [[ -f "$AIE_ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    if ! source "$AIE_ENV_FILE" 2>/dev/null; then
-      echo "WARN: Failed to load $AIE_ENV_FILE; check shell syntax and variable references" >&2
-    fi
-    set +a
+  if ! declare -F safe_load_env &>/dev/null; then
+    echo "WARN: aie_load_env requires _compat.sh to be sourced first" >&2
+    return 1
   fi
+  safe_load_env "${AIE_ENV_FILE:-}"
 }
 
 aie_ensure_dirs() {

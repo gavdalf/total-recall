@@ -34,12 +34,7 @@ PIDFILE="/tmp/total-recall-watcher-$(id -u).pid"
 ACCUMULATED_LINES=0
 
 # Safe env loading
-if [ -f "$WORKSPACE/.env" ]; then
-  set -a
-  # Only load OPENROUTER_API_KEY (minimal credential exposure)
-  eval "$(grep -E '^OPENROUTER_API_KEY=' "$WORKSPACE/.env" 2>/dev/null)" || true
-  set +a
-fi
+safe_load_env "$WORKSPACE/.env"
 
 mkdir -p "$WORKSPACE/logs"
 
@@ -145,13 +140,13 @@ handle_event() {
 }
 
 if $_IS_MACOS; then
-  # macOS: use fswatch
-  fswatch -0 --event Updated "$SESSIONS_DIR" 2>/dev/null | while IFS= read -r -d '' FILEPATH; do
+  # macOS: use fswatch (process substitution avoids subshell variable loss)
+  while IFS= read -r -d '' FILEPATH; do
     handle_event "$FILEPATH"
-  done
+  done < <(fswatch -0 --event Updated "$SESSIONS_DIR" 2>/dev/null)
 else
-  # Linux: use inotifywait
-  inotifywait -m -e modify --format '%f' "$SESSIONS_DIR" 2>/dev/null | while read -r FILENAME; do
+  # Linux: use inotifywait (process substitution avoids subshell variable loss)
+  while read -r FILENAME; do
     handle_event "$SESSIONS_DIR/$FILENAME"
-  done
+  done < <(inotifywait -m -e modify --format '%f' "$SESSIONS_DIR" 2>/dev/null)
 fi

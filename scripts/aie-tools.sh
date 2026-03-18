@@ -297,6 +297,8 @@ run_tool() {
       effective_timeout=$(cap_timeout 5 "$remaining_budget")
       if [[ "$(aie_get "ambient_actions.tool_settings.fitbit_data.enabled" "true")" != "true" ]]; then
         echo '{"status":"error","error":"fitbit_data_disabled"}'
+      elif [[ ! "$query" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo '{"status":"error","error":"fitbit_data_invalid_query"}'
       else
         run_timed_capture "$effective_timeout" 2000 bash -lc 'cat "$0/$1.json"' "$HEALTH_DATA_DIR" "$query"
       fi
@@ -383,7 +385,7 @@ run_tool() {
       local _li_cache="/tmp/linkedin-messages.json"
       # Try to read from Mac Studio via openclaw node invoke
       local _li_result
-      _li_result=$(timeout "$effective_timeout" openclaw nodes invoke \
+      _li_result=$(portable_timeout "$effective_timeout" openclaw nodes invoke \
         --node "Mac Studio" \
         --command system.run \
         --params "{\"command\": [\"cat\", \"$_li_cache\"]}" \

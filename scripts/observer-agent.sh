@@ -31,13 +31,8 @@ MARKER_FILE="$MEMORY_DIR/.observer-last-run"
 HASH_FILE="$MEMORY_DIR/.observer-last-hash"
 LOCK_FILE="$WORKSPACE/logs/reflector.lock"
 
-# Source env if available
-if [ -f "$WORKSPACE/.env" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$WORKSPACE/.env" 2>/dev/null || true
-  set +a
-fi
+# Source env safely
+safe_load_env "$WORKSPACE/.env"
 
 # Re-apply defaults after env load
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
@@ -104,7 +99,7 @@ elif [ "${1:-}" = "--flush" ]; then
   FIND_MIN=125
   log "FLUSH MODE: pre-compaction emergency capture (2hr lookback)"
 else
-  HOUR=$(date +%H)
+  HOUR=$((10#$(date +%H)))
   if [ "$HOUR" -le 7 ]; then
     LOOKBACK_MIN="$OBSERVER_MORNING_LOOKBACK_MIN"
     FIND_MIN=$(( OBSERVER_MORNING_LOOKBACK_MIN + 10 ))

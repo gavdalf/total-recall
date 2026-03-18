@@ -324,3 +324,45 @@ jq_check_ascii_upcase() {
 portable_upcase() {
   tr '[:lower:]' '[:upper:]'
 }
+
+# ─── Safe .env file loader ──────────────────────────────────────────────────
+# Reads KEY=VALUE lines from a .env file without eval or source.
+# Strips surrounding quotes, skips comments and blank lines.
+# Usage: safe_load_env "/path/to/.env"
+safe_load_env() {
+  local envfile="$1"
+  [[ -f "$envfile" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    [[ "$line" =~ ^([A-Za-z_][A-Za-z_0-9]*)=(.*)$ ]] || continue
+    local key="${BASH_REMATCH[1]}"
+    local val="${BASH_REMATCH[2]}"
+    if [[ "$val" =~ ^\"(.*)\"$ ]]; then val="${BASH_REMATCH[1]}"; fi
+    if [[ "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
+    export "$key=$val"
+  done < "$envfile"
+}
+
+# ─── Path traversal guard ───────────────────────────────────────────────────
+# Validate that a relative path resolves within an allowed directory.
+# Usage: require_path_under "label" "relative_path" "allowed_dir" ["base_dir"]
+# base_dir defaults to allowed_dir. Returns 0 if safe, 1 with error on stderr.
+require_path_under() {
+  local label="$1" filepath="$2" allowed_dir="$3" base_dir="${4:-$3}"
+  local resolved
+  resolved="$(cd "$base_dir" 2>/dev/null && portable_realpath_m "$filepath" 2>/dev/null || true)"
+  if [[ -z "$resolved" ]]; then
+    echo "ERROR: Cannot resolve $label path: $filepath" >&2
+    return 1
+  fi
+  local real_allowed
+  real_allowed="$(portable_realpath_m "$allowed_dir" 2>/dev/null || echo "$allowed_dir")"
+  case "$resolved" in
+    "$real_allowed"/*|"$real_allowed") return 0 ;;
+    *)
+      echo "ERROR: $label path must be inside $real_allowed — got: $filepath (resolved: $resolved)" >&2
+      return 1
+      ;;
+  esac
+}

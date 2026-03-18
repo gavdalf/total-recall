@@ -7,19 +7,12 @@ set -euo pipefail
 OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/workspace}"
 SKILL_DIR="$OPENCLAW_WORKSPACE/skills/total-recall"
 
-# Load environment if present
-if [ -f "$OPENCLAW_WORKSPACE/.env" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$OPENCLAW_WORKSPACE/.env"
-  set +a
-fi
+# Load portability helpers (required)
+# shellcheck disable=SC1091
+source "$SKILL_DIR/scripts/_compat.sh"
 
-# Load portability helpers if present
-if [ -f "$SKILL_DIR/scripts/_compat.sh" ]; then
-  # shellcheck disable=SC1090
-  source "$SKILL_DIR/scripts/_compat.sh"
-fi
+# Load environment safely
+safe_load_env "$OPENCLAW_WORKSPACE/.env"
 
 MEMORY_DIR="$OPENCLAW_WORKSPACE/memory"
 OBSERVATIONS_FILE="$MEMORY_DIR/observations.md"
@@ -116,6 +109,7 @@ cmd_archive() {
   local json_arg="${2:-}"
 
   [ -n "$archive_file" ] || { err "Usage: dream-cycle.sh archive <archive-file> <json-data?>"; exit 1; }
+  require_path_under "archive" "$archive_file" "$OPENCLAW_WORKSPACE" "$OPENCLAW_WORKSPACE" || exit 1
   ensure_dirs
 
   local archive_path="$OPENCLAW_WORKSPACE/$archive_file"
@@ -167,6 +161,7 @@ cmd_chunk() {
   local json_arg="${2:-}"
 
   [ -n "$chunk_file" ] || { err "Usage: dream-cycle.sh chunk <chunk-file> <json-data?>"; exit 1; }
+  require_path_under "chunk" "$chunk_file" "$OPENCLAW_WORKSPACE" "$OPENCLAW_WORKSPACE" || exit 1
   ensure_dirs
 
   local chunk_path="$OPENCLAW_WORKSPACE/$chunk_file"
@@ -268,6 +263,7 @@ cmd_chunk() {
 cmd_update_observations() {
   local new_file="${1:-}"
   [ -n "$new_file" ] || { err "Usage: dream-cycle.sh update-observations <new-observations-file>"; exit 1; }
+  require_path_under "update-observations" "$new_file" "$OPENCLAW_WORKSPACE" "$OPENCLAW_WORKSPACE" || exit 1
 
   local source_path="$OPENCLAW_WORKSPACE/$new_file"
   [ -f "$source_path" ] || { err "New observations file not found: $source_path"; exit 1; }
@@ -296,6 +292,7 @@ cmd_write_log() {
   local log_file="${1:-}"
   local json_arg="${2:-}"
   [ -n "$log_file" ] || { err "Usage: dream-cycle.sh write-log <log-file> <json-data?>"; exit 1; }
+  require_path_under "write-log" "$log_file" "$OPENCLAW_WORKSPACE" "$OPENCLAW_WORKSPACE" || exit 1
 
   local path="$OPENCLAW_WORKSPACE/$log_file"
   mkdir -p "$(dirname "$path")"
@@ -354,6 +351,7 @@ cmd_write_metrics() {
   local json_file="${1:-}"
   local json_arg="${2:-}"
   [ -n "$json_file" ] || { err "Usage: dream-cycle.sh write-metrics <json-file> <json-data?>"; exit 1; }
+  require_path_under "write-metrics" "$json_file" "$OPENCLAW_WORKSPACE" "$OPENCLAW_WORKSPACE" || exit 1
 
   local path="$OPENCLAW_WORKSPACE/$json_file"
   mkdir -p "$(dirname "$path")"
