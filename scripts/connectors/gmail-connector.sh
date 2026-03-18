@@ -30,7 +30,7 @@ SCORING_CACHE_THRESHOLD="$(aie_get "connectors.scoring.cache_threshold" "3")"
 
 HTTP_REFERER="$(aie_get "api.http_referer" "")"
 
-GOG_TIMEOUT_SEC=40
+GOG_TIMEOUT_SEC=15
 CURL_TIMEOUT_SEC=45
 LOCK_WAIT_SEC=10
 
@@ -146,12 +146,17 @@ if ! [[ "$GMAIL_MAX_MESSAGES" =~ ^[0-9]+$ ]] || ((GMAIL_MAX_MESSAGES < 1)); then
 fi
 
 health_check() {
-  if ! run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-    gapi_gmail_messages_search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
-    log "ERROR: health_check failed — gmail API unreachable"
-    return 1
-  fi
-  log "health_check OK"
+  local attempt
+  for attempt in 1 2 3; do
+    if run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
+      gapi_gmail_messages_search "$GMAIL_QUERY" --max 1 --json >/dev/null 2>&1; then
+      log "health_check OK (attempt $attempt)"
+      return 0
+    fi
+    [[ $attempt -lt 3 ]] && sleep 2
+  done
+  log "ERROR: health_check failed after 3 attempts — gmail API unreachable"
+  return 1
 }
 
 emit_event() {
@@ -429,7 +434,7 @@ SENDER_CACHE=$(sanitize_sender_cache "$(load_json_object_file "$SENDER_CACHE_FIL
 CACHE_UPDATES='{}'
 
 EMAILS_RAW=$(run_timeout "$GOG_TIMEOUT_SEC" env GOG_KEYRING_PASSWORD="$GMAIL_KEYRING_PASSWORD" GOG_ACCOUNT="$GMAIL_ACCOUNT" \
-  gapi_gmail_messages_search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json 2>/dev/null || echo '{"messages":[]}')
+  gapi_gmail_messages_search "$GMAIL_QUERY" --max "$GMAIL_MAX_MESSAGES" --json --include-body 2>/dev/null || echo '{"messages":[]}')
 EMAILS=$(printf '%s' "$EMAILS_RAW" | jq -c '
   if type == "array" then
     .
@@ -470,7 +475,9 @@ while IFS= read -r email; do
       --arg date "$date_str" --arg domain "$domain" --arg gate "$gate" --argjson importance "$gate_score" \
       '{bus_id:$bus_id,msg_id:$msg_id,subject:$subject,from:$from,date:$date,domain:$domain,gate:$gate,importance:$importance}' >> "$TMP_ITEMS"
   else
-    body_excerpt=$(gmail_fetch_body_excerpt "$msg_id")
+    # Extract body from search results (--include-body), avoid per-email API call
+    body_raw=$(printf '%s' "$email" | jq -r 'try (.body // .body_plain // .snippet // "") catch ""' 2>/dev/null || true)
+    body_excerpt=$(printf '%s' "$body_raw" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | cut -c1-500)
     log "Gate1 miss -> Gate2 queued: $msg_id domain=${domain:-unknown}"
     jq -cn \
       --arg bus_id "$bus_id" --arg msg_id "$msg_id" --arg subject "$subject" --arg from "$from" \

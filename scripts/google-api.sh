@@ -143,16 +143,17 @@ gapi_gmail_get() {
 }
 
 # ─── Gmail messages search (connector-style) ─────────────────────────────────
-# Usage: gapi_gmail_messages_search QUERY [--max MAX] [--json]
+# Usage: gapi_gmail_messages_search QUERY [--max MAX] [--json] [--include-body]
 gapi_gmail_messages_search() {
   _gapi_init
   local query="$1"; shift
-  local max_results="" json_flag=""
+  local max_results="" json_flag="" include_body=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max) max_results="$2"; shift 2 ;;
       --json) json_flag="--json"; shift ;;
+      --include-body) include_body="--include-body"; shift ;;
       *) shift ;;
     esac
   done
@@ -162,6 +163,7 @@ gapi_gmail_messages_search() {
     gog)
       local -a args=(gog gmail messages search "$query" --max "$max_results")
       [[ -n "$json_flag" ]] && args+=(--json)
+      [[ -n "$include_body" ]] && args+=(--include-body)
       "${args[@]}"
       ;;
     gws)
