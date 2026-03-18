@@ -21,9 +21,9 @@ if [[ -z "${AIE_CONFIG_SH_LOADED:-}" ]]; then
 fi
 
 # ─── Load config variables (only if not already set by caller) ───────────────
-: "${MODEL:=$(aie_get "models.rumination" "google/gemini-2.5-flash")}"
-: "${CLASSIFICATION_MODEL:=$(aie_get "models.classification" "google/gemini-2.5-flash")}"
-: "${ENRICHMENT_MODEL:=$(aie_get "models.enrichment" "google/gemini-2.5-flash")}"
+: "${MODEL:=$(aie_get "models.rumination" "google/gemini-3-flash-preview")}"
+: "${CLASSIFICATION_MODEL:=$(aie_get "models.classification" "google/gemini-3-flash-preview")}"
+: "${ENRICHMENT_MODEL:=$(aie_get "models.enrichment" "google/gemini-3-flash-preview")}"
 : "${HTTP_REFERER:=$(aie_get "api.http_referer" "https://github.com/gavdalf/total-recall")}"
 : "${GMAIL_ACCOUNT:=$(aie_get "connectors.gmail.account" "")}"
 : "${GMAIL_KEYRING_PASSWORD:=$(aie_get "connectors.gmail.keyring_password" "")}"
@@ -117,7 +117,7 @@ call_openrouter() {
   local temperature="${3:-0.3}"
   local title="${4:-AIE Call}"
   local model_override="${5:-}"
-  local call_model="${model_override:-${MODEL:-google/gemini-2.5-flash}}"
+  local call_model="${model_override:-${MODEL:-google/gemini-3-flash-preview}}"
 
   if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
     echo "[call_openrouter] ERROR: OPENROUTER_API_KEY not set" >&2

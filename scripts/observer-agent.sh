@@ -16,7 +16,7 @@ SESSIONS_DIR="${SESSIONS_DIR:-$HOME/.openclaw/agents/main/sessions}"
 # LLM provider configuration (OpenAI-compatible APIs)
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
+LLM_MODEL="${LLM_MODEL:-google/gemini-3-flash-preview}"
 
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
 OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-deepseek/deepseek-v3.2}"
@@ -42,7 +42,7 @@ fi
 # Re-apply defaults after env load
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
+LLM_MODEL="${LLM_MODEL:-google/gemini-3-flash-preview}"
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
 
 mkdir -p "$WORKSPACE/logs" "$MEMORY_DIR"

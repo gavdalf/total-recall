@@ -301,7 +301,7 @@ Return ONLY the JSON, no explanation.
 PROMPT
 }
 
-CLASSIFICATION_MODEL="${CLASSIFICATION_MODEL:-$(aie_get "models.classification" "google/gemini-2.5-flash")}"
+CLASSIFICATION_MODEL="${CLASSIFICATION_MODEL:-$(aie_get "models.classification" "google/gemini-3-flash-preview")}"
 log "Building classification prompt for $INSIGHT_COUNT insights..."
 
 CLASSIFICATION_PROMPT=$(build_classification_prompt "$INSIGHTS_JSON")

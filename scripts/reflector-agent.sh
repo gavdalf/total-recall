@@ -14,7 +14,7 @@ MEMORY_DIR="${MEMORY_DIR:-$WORKSPACE/memory}"
 # LLM provider configuration (OpenAI-compatible APIs)
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
+LLM_MODEL="${LLM_MODEL:-google/gemini-3-flash-preview}"
 
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
 REFLECTOR_WORD_THRESHOLD="${REFLECTOR_WORD_THRESHOLD:-8000}"
@@ -36,7 +36,7 @@ fi
 # Re-apply defaults after env load
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
-LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
+LLM_MODEL="${LLM_MODEL:-google/gemini-3-flash-preview}"
 OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
 
 mkdir -p "$WORKSPACE/logs" "$BACKUP_DIR"

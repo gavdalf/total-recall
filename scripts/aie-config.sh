@@ -62,10 +62,10 @@ defaults = {
         "http_referer": "https://github.com/gavdalf/total-recall",
     },
     "models": {
-        "rumination": "google/gemini-2.5-flash",
-        "classification": "google/gemini-2.5-flash",
-        "enrichment": "google/gemini-2.5-flash",
-        "ambient_actions": "google/gemini-2.5-flash",
+        "rumination": "google/gemini-3-flash-preview",
+        "classification": "google/gemini-3-flash-preview",
+        "enrichment": "google/gemini-3-flash-preview",
+        "ambient_actions": "google/gemini-3-flash-preview",
     },
     "connectors": {
         "high_importance_senders": [],  # empty by default; users add their own
