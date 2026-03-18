@@ -17,6 +17,7 @@ LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
 
 REFLECTOR_MODEL="${REFLECTOR_MODEL:-${OBSERVER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}}"
+REFLECTOR_FALLBACK_MODEL="${REFLECTOR_FALLBACK_MODEL:-openrouter/hunter-alpha}"
 REFLECTOR_WORD_THRESHOLD="${REFLECTOR_WORD_THRESHOLD:-8000}"
 
 OBSERVATIONS_FILE="$MEMORY_DIR/observations.md"
@@ -29,7 +30,7 @@ LOCK_FILE="$WORKSPACE/logs/reflector.lock"
 if [ -f "$WORKSPACE/.env" ]; then
   set -a
   # Load provider config + backward compatible OPENROUTER key
-  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY|OBSERVER_MODEL|REFLECTOR_MODEL)=' "$WORKSPACE/.env" 2>/dev/null)" || true
+  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY|OBSERVER_MODEL|REFLECTOR_MODEL|REFLECTOR_FALLBACK_MODEL)=' "$WORKSPACE/.env" 2>/dev/null)" || true
   set +a
 fi
 
@@ -38,6 +39,7 @@ LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
 REFLECTOR_MODEL="${REFLECTOR_MODEL:-${OBSERVER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}}"
+REFLECTOR_FALLBACK_MODEL="${REFLECTOR_FALLBACK_MODEL:-openrouter/hunter-alpha}"
 
 mkdir -p "$WORKSPACE/logs" "$BACKUP_DIR"
 
@@ -108,7 +110,22 @@ PAYLOAD=$(jq -n \
   }')
 
 REFLECTED=""
+MODELS=("$REFLECTOR_MODEL" "$REFLECTOR_FALLBACK_MODEL")
 for ATTEMPT in 1 2; do
+  MODEL="${MODELS[$((ATTEMPT-1))]}"
+  
+  # Update payload with current model
+  PAYLOAD=$(jq -n --arg model "$MODEL" --arg prompt "$PROMPT" '{
+    model: $model,
+    messages: [
+      {
+        role: "system",
+        content: $prompt
+      }
+    ],
+    temperature: 0.2
+  }')
+
   RESPONSE=$(curl -s --max-time 120 "$LLM_BASE_URL/chat/completions" \
     -H "Authorization: Bearer $LLM_API_KEY" \
     -H "Content-Type: application/json" \
@@ -129,7 +146,7 @@ for ATTEMPT in 1 2; do
   [ -n "$REFLECTED" ] && break
 
   ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty' 2>/dev/null)
-  log "API attempt $ATTEMPT failed: ${ERROR:-unknown error}"
+  log "API attempt $ATTEMPT failed with model $MODEL: ${ERROR:-unknown error}"
   [ "$ATTEMPT" -lt 2 ] && sleep 5
 done
 

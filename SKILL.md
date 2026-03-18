@@ -104,7 +104,7 @@ All scripts read from environment variables with sensible defaults:
 | `OBSERVER_COOLDOWN_SECS` | `300` | Cooldown between reactive triggers (Linux) |
 | `REFLECTOR_WORD_THRESHOLD` | `8000` | Words before reflector runs |
 | `REFLECTOR_MODEL` | `nvidia/nemotron-3-super-120b-a12b:free` | Model for consolidating observations (free) |
-| `REFLECTOR_FALLBACK_MODEL` | `openrouter/hunter-alpha` | Fallback if reflector model fails |
+| `REFLECTOR_FALLBACK_MODEL` | `openrouter/hunter-alpha` | Fallback if reflector model fails (free) |
 | `OPENCLAW_WORKSPACE` | `~/your-workspace` | Workspace root |
 
 ## LLM Provider Configuration
