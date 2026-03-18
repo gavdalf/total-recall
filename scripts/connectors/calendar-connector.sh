@@ -45,12 +45,17 @@ if [[ -z "$CALENDAR_ACCOUNT" || -z "$KEYRING_PASSWORD" ]]; then
 fi
 
 health_check() {
-  if ! GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
-      gapi_calendar_events "$CALENDAR_ID" --days 1 --max 1 --json >/dev/null 2>&1; then
-    log "ERROR: health_check failed — calendar API not reachable (auth expiry?)"
-    exit 1
-  fi
-  log "health_check OK"
+  local attempt
+  for attempt in 1 2 3; do
+    if GOG_KEYRING_PASSWORD="$KEYRING_PASSWORD" GOG_ACCOUNT="$CALENDAR_ACCOUNT" \
+        gapi_calendar_events "$CALENDAR_ID" --days 1 --max 1 --json >/dev/null 2>&1; then
+      log "health_check OK (attempt $attempt)"
+      return 0
+    fi
+    [[ $attempt -lt 3 ]] && sleep 2
+  done
+  log "ERROR: health_check failed after 3 attempts — calendar API not reachable (auth expiry?)"
+  exit 1
 }
 
 emit_event() {
