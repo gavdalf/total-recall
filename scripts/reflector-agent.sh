@@ -16,7 +16,8 @@ LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
 
-OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
+REFLECTOR_MODEL="${REFLECTOR_MODEL:-${OBSERVER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}}"
+REFLECTOR_FALLBACK_MODEL="${REFLECTOR_FALLBACK_MODEL:-openrouter/hunter-alpha}"
 REFLECTOR_WORD_THRESHOLD="${REFLECTOR_WORD_THRESHOLD:-8000}"
 
 OBSERVATIONS_FILE="$MEMORY_DIR/observations.md"
@@ -29,7 +30,7 @@ LOCK_FILE="$WORKSPACE/logs/reflector.lock"
 if [ -f "$WORKSPACE/.env" ]; then
   set -a
   # Load provider config + backward compatible OPENROUTER key
-  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY)=' "$WORKSPACE/.env" 2>/dev/null)" || true
+  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY|OBSERVER_MODEL|REFLECTOR_MODEL|REFLECTOR_FALLBACK_MODEL)=' "$WORKSPACE/.env" 2>/dev/null)" || true
   set +a
 fi
 
@@ -37,7 +38,11 @@ fi
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-google/gemini-2.5-flash}"
-OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
+# Only set REFLECTOR_MODEL if not already set in .env, fallback to OBSERVER_MODEL (from .env or default), then to default model
+if [ -z "${REFLECTOR_MODEL:-}" ]; then
+  REFLECTOR_MODEL="${OBSERVER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}"
+fi
+REFLECTOR_FALLBACK_MODEL="${REFLECTOR_FALLBACK_MODEL:-openrouter/hunter-alpha}"
 
 mkdir -p "$WORKSPACE/logs" "$BACKUP_DIR"
 
@@ -96,7 +101,7 @@ TODAY=$(date '+%Y-%m-%d')
 PAYLOAD=$(jq -n \
   --arg system "$SYSTEM_PROMPT" \
   --arg obs "Today is $TODAY. Here is the current observation log to consolidate:\n\n$CURRENT_OBS" \
-  --arg model "$OBSERVER_MODEL" \
+  --arg model "$REFLECTOR_MODEL" \
   '{
     model: $model,
     messages: [
@@ -108,17 +113,34 @@ PAYLOAD=$(jq -n \
   }')
 
 REFLECTED=""
+MODELS=("$REFLECTOR_MODEL" "$REFLECTOR_FALLBACK_MODEL")
 for ATTEMPT in 1 2; do
+  MODEL="${MODELS[$((ATTEMPT-1))]}"
+  
+  # Update payload with current model
+  ATTEMPT_PAYLOAD=$(echo "$PAYLOAD" | jq --arg m "$MODEL" '.model = $m')
+
   RESPONSE=$(curl -s --max-time 120 "$LLM_BASE_URL/chat/completions" \
     -H "Authorization: Bearer $LLM_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "$PAYLOAD" 2>/dev/null)
+    -d "$ATTEMPT_PAYLOAD" 2>/dev/null)
 
-  REFLECTED=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+  CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+  REASONING=$(echo "$RESPONSE" | jq -r '.choices[0].message.reasoning // empty' 2>/dev/null)
+  
+  # Use content if not empty and not just whitespace, otherwise fall back to reasoning
+  if [ -n "$CONTENT" ] && [ "$CONTENT" != "null" ] && [ "$CONTENT" != "" ] && [[ "$CONTENT" =~ [^[:space:]] ]]; then
+    REFLECTED="$CONTENT"
+  elif [ -n "$REASONING" ] && [ "$REASONING" != "null" ] && [ "$REASONING" != "" ] && [[ "$REASONING" =~ [^[:space:]] ]]; then
+    REFLECTED="$REASONING"
+  else
+    REFLECTED=""
+  fi
+  
   [ -n "$REFLECTED" ] && break
 
   ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty' 2>/dev/null)
-  log "API attempt $ATTEMPT failed: ${ERROR:-unknown error}"
+  log "API attempt $ATTEMPT failed with model $MODEL: ${ERROR:-unknown error}"
   [ "$ATTEMPT" -lt 2 ] && sleep 5
 done
 

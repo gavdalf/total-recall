@@ -18,8 +18,8 @@ LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
 
-OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
-OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-google/gemini-2.5-flash}"
+OBSERVER_MODEL="${OBSERVER_MODEL:-stepfun/step-3.5-flash:free}"
+OBSERVER_FALLBACK_MODEL="${OBSERVER_FALLBACK_MODEL:-nvidia/nemotron-3-nano-30b-a3b:free}"
 OBSERVER_LOOKBACK_MIN="${OBSERVER_LOOKBACK_MIN:-15}"
 OBSERVER_MORNING_LOOKBACK_MIN="${OBSERVER_MORNING_LOOKBACK_MIN:-480}"
 REFLECTOR_WORD_THRESHOLD="${REFLECTOR_WORD_THRESHOLD:-8000}"
@@ -35,7 +35,7 @@ LOCK_FILE="$WORKSPACE/logs/reflector.lock"
 if [ -f "$WORKSPACE/.env" ]; then
   set -a
   # Load provider config + backward compatible OPENROUTER key
-  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY)=' "$WORKSPACE/.env" 2>/dev/null)" || true
+  eval "$(grep -E '^(LLM_BASE_URL|LLM_API_KEY|LLM_MODEL|OPENROUTER_API_KEY|OBSERVER_MODEL|OBSERVER_FALLBACK_MODEL)=' "$WORKSPACE/.env" 2>/dev/null)" || true
   set +a
 fi
 
@@ -43,7 +43,7 @@ fi
 LLM_BASE_URL="${LLM_BASE_URL:-https://openrouter.ai/api/v1}"
 LLM_API_KEY="${LLM_API_KEY:-${OPENROUTER_API_KEY:-}}"
 LLM_MODEL="${LLM_MODEL:-deepseek/deepseek-v3.2}"
-OBSERVER_MODEL="${OBSERVER_MODEL:-$LLM_MODEL}"
+OBSERVER_MODEL="${OBSERVER_MODEL:-stepfun/step-3.5-flash:free}"
 
 mkdir -p "$WORKSPACE/logs" "$MEMORY_DIR"
 
@@ -251,7 +251,17 @@ for ATTEMPT in 1 2; do
   log "DEBUG: LLM Response (first 500 chars): ${RESPONSE:0:500}"
 
 
-  OBSERVATION=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+  CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+  REASONING=$(echo "$RESPONSE" | jq -r '.choices[0].message.reasoning // empty' 2>/dev/null)
+  
+  # Use content if not empty and not just whitespace, otherwise fall back to reasoning
+  if [ -n "$CONTENT" ] && [ "$CONTENT" != "null" ] && [ "$CONTENT" != "" ] && [[ "$CONTENT" =~ [^[:space:]] ]]; then
+    OBSERVATION="$CONTENT"
+  elif [ -n "$REASONING" ] && [ "$REASONING" != "null" ] && [ "$REASONING" != "" ] && [[ "$REASONING" =~ [^[:space:]] ]]; then
+    OBSERVATION="$REASONING"
+  else
+    OBSERVATION=""
+  fi
 
   if [ -n "$OBSERVATION" ]; then
     log "Success with model $MODEL on attempt $ATTEMPT"
