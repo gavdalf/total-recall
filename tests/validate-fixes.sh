@@ -83,11 +83,128 @@ fi
 echo ""
 echo "🎯 Script Validation Complete"
 
+# ─── Integrity verification tests ───────────────────────────────────────────
+
+echo ""
+echo "📋 Test 6: integrity-check.sh exists and is executable"
+if [ -f "scripts/integrity-check.sh" ]; then
+    chmod +x scripts/integrity-check.sh
+    echo "✅ integrity-check.sh present"
+else
+    echo "❌ integrity-check.sh missing"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 7: integrity.yaml config file present"
+if [ -f "config/integrity.yaml" ]; then
+    echo "✅ config/integrity.yaml present"
+else
+    echo "❌ config/integrity.yaml missing"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 8: integrity.yaml has required keys"
+if grep -q 'enabled:' config/integrity.yaml && \
+   grep -q 'sample_n:' config/integrity.yaml && \
+   grep -q 'block_on_flag:' config/integrity.yaml && \
+   grep -q 'reflector_threshold:' config/integrity.yaml && \
+   grep -q 'dream_threshold:' config/integrity.yaml; then
+    echo "✅ integrity.yaml has all required config keys"
+else
+    echo "❌ integrity.yaml missing required keys"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 9: reflector-agent.sh integrates integrity capture + verify"
+if grep -q 'integrity-check.sh' scripts/reflector-agent.sh && \
+   grep -q 'integrity.*pre-reflector\|integrity-pre-reflector' scripts/reflector-agent.sh && \
+   grep -q 'integrity.*verify\|INTEGRITY_RESULT' scripts/reflector-agent.sh; then
+    echo "✅ reflector-agent.sh has integrity capture + verify hooks"
+else
+    echo "❌ reflector-agent.sh missing integrity hooks"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 10: dream-cycle.sh integrates integrity capture in preflight"
+if grep -q 'integrity-check.sh' scripts/dream-cycle.sh && \
+   grep -q 'integrity-pre-dream' scripts/dream-cycle.sh; then
+    echo "✅ dream-cycle.sh preflight has integrity capture hook"
+else
+    echo "❌ dream-cycle.sh missing integrity capture in preflight"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 11: dream-cycle.sh integrates integrity verify in update-observations"
+if grep -q 'integrity: verify post-dream\|integrity_pre_state.*dream\|verify.*integrity.*dream' scripts/dream-cycle.sh; then
+    echo "✅ dream-cycle.sh update-observations has integrity verify hook"
+else
+    echo "❌ dream-cycle.sh missing integrity verify in update-observations"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 12: integrity-check.sh has capture and verify commands"
+if grep -q 'cmd_capture()' scripts/integrity-check.sh && \
+   grep -q 'cmd_verify()' scripts/integrity-check.sh; then
+    echo "✅ integrity-check.sh has capture + verify functions"
+else
+    echo "❌ integrity-check.sh missing capture or verify functions"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 13: integrity-check.sh respects INTEGRITY_ENABLED=false"
+if grep -q 'INTEGRITY_ENABLED.*true' scripts/integrity-check.sh && \
+   grep -q 'disabled.*skipping\|status.*disabled' scripts/integrity-check.sh; then
+    echo "✅ integrity-check.sh respects disabled flag"
+else
+    echo "❌ integrity-check.sh does not handle INTEGRITY_ENABLED=false"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 14: integrity-check.sh has flag-only default (non-blocking)"
+if grep -q 'BLOCK_ON_FLAG.*false\|block_on_flag.*false' scripts/integrity-check.sh && \
+   grep -q 'BLOCK_ON_FLAG.*true' scripts/integrity-check.sh && \
+   grep -q 'exit 2' scripts/integrity-check.sh; then
+    echo "✅ integrity-check.sh is flag-only by default (non-blocking)"
+else
+    echo "❌ integrity-check.sh blocking behavior misconfigured"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 15: cosine similarity uses Python3 (portable float math)"
+if grep -q '_cosine_sim' scripts/integrity-check.sh && \
+   grep -A5 '_cosine_sim()' scripts/integrity-check.sh | grep -q 'python3'; then
+    echo "✅ cosine similarity implemented via python3"
+else
+    echo "❌ cosine similarity not using python3"
+    ((FAILURES++))
+fi
+
+echo ""
+echo "📋 Test 16: dry-run mode supported"
+if grep -q 'dry.run' scripts/integrity-check.sh && \
+   grep -q 'dry.run' scripts/dream-cycle.sh; then
+    echo "✅ dry-run mode supported in both scripts"
+else
+    echo "❌ dry-run mode missing"
+    ((FAILURES++))
+fi
+
 # Exit with error code if any tests failed
 if [ "$FAILURES" -gt 0 ]; then
+    echo ""
     echo "❌ $FAILURES test(s) failed"
     exit 1
 else
+    echo ""
     echo "✅ All tests passed"
     exit 0
 fi

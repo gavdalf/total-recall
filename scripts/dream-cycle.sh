@@ -108,6 +108,15 @@ cmd_preflight() {
     git_snapshot "Pre-dream snapshot: $(ISO_STAMP_UTC)"
   fi
 
+  # --- Integrity: capture pre-dream sample ---
+  local integrity_script="$SKILL_DIR/scripts/integrity-check.sh"
+  local integrity_pre_state="$MEMORY_DIR/.integrity-pre-dream.json"
+  if [ -f "$integrity_script" ] && [ "${INTEGRITY_ENABLED:-true}" = "true" ]; then
+    local dry_run_flag=""
+    [ "$dry_run" = "true" ] && dry_run_flag="--dry-run"
+    bash "$integrity_script" dream $dry_run_flag capture "$OBSERVATIONS_FILE" "$integrity_pre_state" >/dev/null 2>&1 || true
+  fi
+
   info "{\"status\":\"ok\",\"command\":\"preflight\",\"dry_run\":$dry_run,\"backup\":\"$backup_file\"}"
 }
 
@@ -285,6 +294,13 @@ cmd_update_observations() {
   after_tokens="$(token_count "$tmp")"
 
   mv "$tmp" "$OBSERVATIONS_FILE"
+
+  # --- Integrity: verify post-dream similarity ---
+  local integrity_script="$SKILL_DIR/scripts/integrity-check.sh"
+  local integrity_pre_state="$MEMORY_DIR/.integrity-pre-dream.json"
+  if [ -f "$integrity_script" ] && [ "${INTEGRITY_ENABLED:-true}" = "true" ] && [ -f "$integrity_pre_state" ]; then
+    bash "$integrity_script" dream "" verify "$OBSERVATIONS_FILE" "$integrity_pre_state" >/dev/null 2>&1 || true
+  fi
 
   git -C "$OPENCLAW_WORKSPACE" add "$OBSERVATIONS_FILE"
   git -C "$OPENCLAW_WORKSPACE" commit -m "Dream cycle: update observations $(ISO_STAMP_UTC)" || true

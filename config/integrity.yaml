@@ -1,0 +1,42 @@
+# Memory Integrity Verification Configuration
+# See: https://github.com/gavdalf/total-recall/issues/18
+#
+# All settings have sensible defaults and can also be overridden via
+# environment variables (env vars take precedence).
+
+integrity:
+  # Set to false to disable all integrity checks without removing them from scripts.
+  enabled: true
+
+  # Number of observations to sample at each checkpoint.
+  # Increase for higher confidence; decrease to reduce API cost.
+  # Env: INTEGRITY_SAMPLE_N
+  sample_n: 10
+
+  # Block the pipeline (exit 2) when a flag is raised.
+  # Default: false — flag and log, but continue.
+  # Recommended: leave false until you have calibration data.
+  # Env: INTEGRITY_BLOCK_ON_FLAG
+  block_on_flag: false
+
+  thresholds:
+    # Global fallback threshold for cosine similarity.
+    # Values below this trigger a drift flag.
+    # Env: INTEGRITY_THRESHOLD
+    default: 0.85
+
+    # Per-checkpoint overrides (optional).
+    # Set independently once you have calibration data to tune each boundary.
+    # Env: INTEGRITY_REFLECTOR_THRESHOLD
+    reflector_threshold: 0.85
+
+    # Env: INTEGRITY_DREAM_THRESHOLD
+    dream_threshold: 0.85
+
+  # Embedding model (Gemini Embedding 2 — standalone, no Phase 7B dependency).
+  # When Phase 7B lands, refactor to reuse cached embeddings from that pipeline.
+  embedding_model: text-embedding-004
+
+  # API key environment variable name to use for embeddings.
+  # Falls back to GOOGLE_API_KEY if GEMINI_API_KEY is not set.
+  api_key_env: GEMINI_API_KEY

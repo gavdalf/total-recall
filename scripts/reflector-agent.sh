@@ -94,6 +94,15 @@ BACKUP_FILE="$BACKUP_DIR/observations-$(date '+%Y%m%d-%H%M%S').md"
 cp "$OBSERVATIONS_FILE" "$BACKUP_FILE"
 log "Backed up to $BACKUP_FILE"
 
+# --- Integrity: capture pre-reflection sample ---
+INTEGRITY_SCRIPT="$SKILL_DIR/scripts/integrity-check.sh"
+INTEGRITY_PRE_STATE="$MEMORY_DIR/.integrity-pre-reflector.json"
+if [ -f "$INTEGRITY_SCRIPT" ] && [ "${INTEGRITY_ENABLED:-true}" = "true" ]; then
+  log "Integrity: capturing pre-reflection sample"
+  bash "$INTEGRITY_SCRIPT" reflector "" capture "$OBSERVATIONS_FILE" "$INTEGRITY_PRE_STATE" 2>/dev/null || \
+    log "Integrity: capture failed (non-fatal — check will be skipped)"
+fi
+
 CURRENT_OBS=$(cat "$OBSERVATIONS_FILE")
 SYSTEM_PROMPT=$(cat "$REFLECTOR_PROMPT")
 TODAY=$(date '+%Y-%m-%d')
@@ -173,6 +182,14 @@ mv "$TMPOUT" "$OBSERVATIONS_FILE"
 NEW_WORDS=$(wc -w < "$OBSERVATIONS_FILE")
 REDUCTION=$(( (OBS_WORDS - NEW_WORDS) * 100 / OBS_WORDS ))
 log "Reflection complete. $OBS_WORDS → $NEW_WORDS words ($REDUCTION% reduction)"
+
+# --- Integrity: verify post-reflection similarity ---
+if [ -f "$INTEGRITY_SCRIPT" ] && [ "${INTEGRITY_ENABLED:-true}" = "true" ] && [ -f "$INTEGRITY_PRE_STATE" ]; then
+  log "Integrity: verifying post-reflection similarity"
+  INTEGRITY_RESULT=$(bash "$INTEGRITY_SCRIPT" reflector "" verify "$OBSERVATIONS_FILE" "$INTEGRITY_PRE_STATE" 2>/dev/null) || \
+    log "Integrity: verify failed (non-fatal)"
+  [ -n "$INTEGRITY_RESULT" ] && log "Integrity result: $INTEGRITY_RESULT"
+fi
 
 # Clean old backups (keep last 10) — null-safe
 find "$BACKUP_DIR" -name "observations-*.md" -type f | sort -r | tail -n +11 | while IFS= read -r old; do
