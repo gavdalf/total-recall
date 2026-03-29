@@ -99,7 +99,7 @@ INTEGRITY_SCRIPT="$SKILL_DIR/scripts/integrity-check.sh"
 INTEGRITY_PRE_STATE="$MEMORY_DIR/.integrity-pre-reflector.json"
 if [ -f "$INTEGRITY_SCRIPT" ] && [ "${INTEGRITY_ENABLED:-true}" = "true" ]; then
   log "Integrity: capturing pre-reflection sample"
-  bash "$INTEGRITY_SCRIPT" reflector "" capture "$OBSERVATIONS_FILE" "$INTEGRITY_PRE_STATE" 2>/dev/null || \
+  bash "$INTEGRITY_SCRIPT" reflector capture "$OBSERVATIONS_FILE" "$INTEGRITY_PRE_STATE" 2>/dev/null || \
     log "Integrity: capture failed (non-fatal — check will be skipped)"
 fi
 
@@ -186,9 +186,15 @@ log "Reflection complete. $OBS_WORDS → $NEW_WORDS words ($REDUCTION% reduction
 # --- Integrity: verify post-reflection similarity ---
 if [ -f "$INTEGRITY_SCRIPT" ] && [ "${INTEGRITY_ENABLED:-true}" = "true" ] && [ -f "$INTEGRITY_PRE_STATE" ]; then
   log "Integrity: verifying post-reflection similarity"
-  INTEGRITY_RESULT=$(bash "$INTEGRITY_SCRIPT" reflector "" verify "$OBSERVATIONS_FILE" "$INTEGRITY_PRE_STATE" 2>/dev/null) || \
-    log "Integrity: verify failed (non-fatal)"
+  INTEGRITY_EXIT=0
+  INTEGRITY_RESULT=$(bash "$INTEGRITY_SCRIPT" reflector verify "$OBSERVATIONS_FILE" "$INTEGRITY_PRE_STATE" 2>&1) || INTEGRITY_EXIT=$?
   [ -n "$INTEGRITY_RESULT" ] && log "Integrity result: $INTEGRITY_RESULT"
+  if [ "$INTEGRITY_EXIT" -eq 2 ] && [ "${INTEGRITY_BLOCK_ON_FLAG:-false}" = "true" ]; then
+    log "Integrity: flag raised and INTEGRITY_BLOCK_ON_FLAG=true — halting pipeline"
+    exit 2
+  elif [ "$INTEGRITY_EXIT" -ne 0 ] && [ "$INTEGRITY_EXIT" -ne 2 ]; then
+    log "Integrity: verify returned exit $INTEGRITY_EXIT (non-fatal)"
+  fi
 fi
 
 # Clean old backups (keep last 10) — null-safe

@@ -299,7 +299,16 @@ cmd_update_observations() {
   local integrity_script="$SKILL_DIR/scripts/integrity-check.sh"
   local integrity_pre_state="$MEMORY_DIR/.integrity-pre-dream.json"
   if [ -f "$integrity_script" ] && [ "${INTEGRITY_ENABLED:-true}" = "true" ] && [ -f "$integrity_pre_state" ]; then
-    bash "$integrity_script" dream "" verify "$OBSERVATIONS_FILE" "$integrity_pre_state" >/dev/null 2>&1 || true
+    local integrity_exit=0
+    bash "$integrity_script" dream verify "$OBSERVATIONS_FILE" "$integrity_pre_state" >/dev/null 2>&1 || integrity_exit=$?
+    if [ "$integrity_exit" -ne 0 ]; then
+      if [ "$integrity_exit" -eq 2 ] && [ "${INTEGRITY_BLOCK_ON_FLAG:-false}" = "true" ]; then
+        err "Integrity flag raised and INTEGRITY_BLOCK_ON_FLAG=true — halting pipeline"
+        exit 2
+      else
+        log "Integrity: verify returned exit $integrity_exit (non-fatal)"
+      fi
+    fi
   fi
 
   git -C "$OPENCLAW_WORKSPACE" add "$OBSERVATIONS_FILE"

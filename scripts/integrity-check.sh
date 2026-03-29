@@ -62,7 +62,8 @@ GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
 
 CHECKPOINT="${1:-}"  # "reflector" or "dream"
 DRY_RUN="false"
-[ "${2:-}" = "--dry-run" ] && DRY_RUN="true"
+# Consume optional --dry-run flag (may appear as $2 before or alongside subcommand)
+shift || true  # shift past CHECKPOINT
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,9 @@ import yaml, sys
 try:
     with open('$INTEGRITY_CFG') as f:
         d = yaml.safe_load(f)
-    val = d.get('thresholds', {}).get('$key', $default)
+    # Read from nested integrity.thresholds, not document root
+    thresholds = (d or {}).get('integrity', {}).get('thresholds', {})
+    val = thresholds.get('$key', $default)
     print(val)
 except Exception:
     print($default)
@@ -327,6 +330,22 @@ cmd_verify() {
   local min_sim="1.0"
   local flag_rows=""
 
+  # Guard: if no post embeddings were obtained, skip similarity checks
+  if [ "${#post_vecs[@]}" -eq 0 ]; then
+    log "verify: no post-compression embeddings available (API unavailable or empty file) — skipping similarity checks"
+    rm -f "$state_in"
+    echo "{\"status\":\"skipped\",\"reason\":\"no_post_embeddings\",\"checkpoint\":\"$CHECKPOINT\"}"
+    exit 0
+  fi
+
+  # Guard: python3 is required for float arithmetic
+  if ! command -v python3 &>/dev/null; then
+    log "verify: python3 not available — skipping similarity checks"
+    rm -f "$state_in"
+    echo "{\"status\":\"skipped\",\"reason\":\"python3_unavailable\",\"checkpoint\":\"$CHECKPOINT\"}"
+    exit 0
+  fi
+
   while IFS= read -r pre_entry; do
     local pre_text
     pre_text=$(echo "$pre_entry" | jq -r '.text')
@@ -399,9 +418,19 @@ fi
 
 [ -n "$CHECKPOINT" ] || { err "Usage: integrity-check.sh <reflector|dream> [--dry-run] <capture|verify> [args...]"; exit 1; }
 
-COMMAND="${3:-}"
-ARG1="${4:-}"
-ARG2="${5:-}"
+# Parse remaining args: [--dry-run] <command> [arg1] [arg2]
+REMAINING_ARGS=()
+for _arg in "$@"; do
+  if [ "$_arg" = "--dry-run" ]; then
+    DRY_RUN="true"
+  else
+    REMAINING_ARGS+=("$_arg")
+  fi
+done
+
+COMMAND="${REMAINING_ARGS[0]:-}"
+ARG1="${REMAINING_ARGS[1]:-}"
+ARG2="${REMAINING_ARGS[2]:-}"
 
 case "$COMMAND" in
   capture) cmd_capture "$ARG1" "$ARG2" ;;

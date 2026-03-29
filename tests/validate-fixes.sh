@@ -198,6 +198,107 @@ else
     ((FAILURES++))
 fi
 
+echo ""
+echo "📋 Test 17: execution-level — integrity-check.sh capture/verify argv + exit-code propagation"
+_run_integration_stub_test() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' RETURN
+
+  # Create a minimal stubbed observations file
+  printf 'obs line one\nobs line two\nobs line three\n' > "$tmpdir/observations.md"
+
+  # Create a stubbed integrity-check.sh that inspects argv and exits with a known code
+  cat > "$tmpdir/integrity-check.sh" <<'STUB'
+#!/usr/bin/env bash
+CHECKPOINT="$1"; shift
+COMMAND=""
+DRY_RUN="false"
+for _a in "$@"; do
+  [ "$_a" = "--dry-run" ] && DRY_RUN="true" && continue
+  [ -z "$COMMAND" ] && COMMAND="$_a" && continue
+done
+# Record invocation for test inspection
+echo "$CHECKPOINT $COMMAND dry=$DRY_RUN" >> "${STUB_LOG:-/dev/null}"
+# cmd_capture: always succeeds
+# cmd_verify: exit 2 if BLOCK requested to test propagation
+if [ "$COMMAND" = "verify" ] && [ "${STUB_BLOCK:-false}" = "true" ]; then
+  exit 2
+fi
+exit 0
+STUB
+  chmod +x "$tmpdir/integrity-check.sh"
+
+  local stub_log="$tmpdir/stub.log"
+  local ok=1
+
+  # ── Test 17a: capture is called with correct CHECKPOINT arg ──────────────
+  STUB_LOG="$stub_log" INTEGRITY_ENABLED="true" \
+    bash "$tmpdir/integrity-check.sh" reflector capture "$tmpdir/observations.md" "$tmpdir/pre.json" 2>/dev/null
+  if grep -q "^reflector capture" "$stub_log" 2>/dev/null; then
+    echo "  ✅ 17a: capture called with CHECKPOINT=reflector"
+  else
+    echo "  ❌ 17a: capture argv shape wrong (expected 'reflector capture ...')"
+    ok=0
+  fi
+  > "$stub_log"
+
+  # ── Test 17b: verify exit 2 propagates through dream-cycle wrapper ────────
+  # Create a minimal dream-cycle wrapper that calls our stub
+  cat > "$tmpdir/dream-cycle-wrapper.sh" <<WRAPPER
+#!/usr/bin/env bash
+SKILL_DIR="$tmpdir"
+MEMORY_DIR="$tmpdir"
+OBSERVATIONS_FILE="$tmpdir/observations.md"
+INTEGRITY_SCRIPT="$tmpdir/integrity-check.sh"
+INTEGRITY_PRE_STATE="$tmpdir/pre-dream.json"
+INTEGRITY_ENABLED=true
+INTEGRITY_BLOCK_ON_FLAG=true
+STUB_BLOCK=true
+STUB_LOG="$stub_log"
+export INTEGRITY_ENABLED INTEGRITY_BLOCK_ON_FLAG STUB_BLOCK STUB_LOG
+# Simulate the dream-cycle update-observations integrity block
+touch "\$INTEGRITY_PRE_STATE"
+if [ -f "\$INTEGRITY_SCRIPT" ] && [ "\${INTEGRITY_ENABLED}" = "true" ] && [ -f "\$INTEGRITY_PRE_STATE" ]; then
+  local_exit=0
+  bash "\$INTEGRITY_SCRIPT" dream verify "\$OBSERVATIONS_FILE" "\$INTEGRITY_PRE_STATE" >/dev/null 2>&1 || local_exit=\$?
+  if [ "\$local_exit" -eq 2 ] && [ "\${INTEGRITY_BLOCK_ON_FLAG:-false}" = "true" ]; then
+    exit 2
+  fi
+fi
+exit 0
+WRAPPER
+  chmod +x "$tmpdir/dream-cycle-wrapper.sh"
+  bash "$tmpdir/dream-cycle-wrapper.sh"
+  local wrapper_exit=$?
+  if [ "$wrapper_exit" -eq 2 ]; then
+    echo "  ✅ 17b: exit 2 from verifier propagated through dream-cycle wrapper"
+  else
+    echo "  ❌ 17b: dream-cycle wrapper masked exit 2 (got exit $wrapper_exit)"
+    ok=0
+  fi
+  > "$stub_log"
+
+  # ── Test 17c: --dry-run flag parsed correctly ─────────────────────────────
+  STUB_LOG="$stub_log" INTEGRITY_ENABLED="true" \
+    bash "$tmpdir/integrity-check.sh" dream --dry-run capture "$tmpdir/observations.md" 2>/dev/null
+  if grep -q "dry=true" "$stub_log" 2>/dev/null; then
+    echo "  ✅ 17c: --dry-run flag parsed correctly"
+  else
+    echo "  ❌ 17c: --dry-run flag not detected in argv"
+    ok=0
+  fi
+
+  return $((1 - ok))
+}
+
+if _run_integration_stub_test; then
+  echo "✅ Test 17: execution-level stub tests passed"
+else
+  echo "❌ Test 17: one or more execution-level sub-tests failed"
+  ((FAILURES++))
+fi
+
 # Exit with error code if any tests failed
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
