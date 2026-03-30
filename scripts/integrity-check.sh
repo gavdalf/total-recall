@@ -4,8 +4,8 @@
 # https://github.com/gavdalf/total-recall/issues/18
 #
 # Usage:
-#   integrity-check.sh reflector [--dry-run]
-#   integrity-check.sh dream     [--dry-run]
+#   integrity-check.sh <reflector|dream> [--dry-run] capture <obs_file> <state_file>
+#   integrity-check.sh <reflector|dream> [--dry-run] verify  <obs_file> <state_file>
 #
 # Samples observations before a compression boundary, embeds both pre- and
 # post-versions with Gemini Embedding 2, and flags any pair whose cosine
@@ -18,6 +18,7 @@
 # Exit codes:
 #   0  Check passed (or flag-only mode — flags written but no hard fail)
 #   1  Fatal error (missing files, API failure with no fallback)
+#   2  Integrity flag raised with INTEGRITY_BLOCK_ON_FLAG=true (blocking mode)
 #
 # Environment / config keys (all optional — see integrity.yaml):
 #   INTEGRITY_ENABLED              true|false (default: true)
@@ -37,13 +38,14 @@ WORKSPACE="${OPENCLAW_WORKSPACE:-$(cd "$SKILL_DIR/../.." && pwd)}"
 MEMORY_DIR="${MEMORY_DIR:-$WORKSPACE/memory}"
 LOGS_DIR="${LOGS_DIR:-$WORKSPACE/logs}"
 
+mkdir -p "$LOGS_DIR"
+
 INTEGRITY_LOG="$MEMORY_DIR/integrity-log.md"
 DREAM_LOG_DIR="$MEMORY_DIR/dream-logs"
 INTEGRITY_CFG="$SKILL_DIR/config/integrity.yaml"
 
 # Load env — safe line-by-line parser (no eval; values treated as data, not commands)
 if [ -f "$WORKSPACE/.env" ]; then
-  _ALLOWED_KEYS_RE='^(INTEGRITY_[A-Z_]+|GEMINI_API_KEY|GOOGLE_API_KEY|LLM_API_KEY)$'
   while IFS= read -r _line || [ -n "$_line" ]; do
     # Skip empty lines and comments
     case "$_line" in ''|'#'*) continue ;; esac
@@ -62,7 +64,7 @@ if [ -f "$WORKSPACE/.env" ]; then
     esac
     export "$_key=$_val"
   done < "$WORKSPACE/.env"
-  unset _line _key _val _ALLOWED_KEYS_RE
+  unset _line _key _val
 fi
 
 # Config defaults (can be overridden by integrity.yaml or env)
