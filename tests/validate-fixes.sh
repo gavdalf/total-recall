@@ -241,7 +241,7 @@ STUB
     echo "  ❌ 17a: capture argv shape wrong (expected 'reflector capture ...')"
     ok=0
   fi
-  > "$stub_log"
+  : > "$stub_log"
 
   # ── Test 17b: verify exit 2 propagates through dream-cycle wrapper ────────
   # Create a minimal dream-cycle wrapper that calls our stub
@@ -277,7 +277,7 @@ WRAPPER
     echo "  ❌ 17b: dream-cycle wrapper masked exit 2 (got exit $wrapper_exit)"
     ok=0
   fi
-  > "$stub_log"
+  : > "$stub_log"
 
   # ── Test 17c: --dry-run flag parsed correctly ─────────────────────────────
   STUB_LOG="$stub_log" INTEGRITY_ENABLED="true" \

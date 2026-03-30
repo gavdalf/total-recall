@@ -217,7 +217,15 @@ cmd_capture() {
   [ -f "$obs_file" ] || { err "Observations file not found: $obs_file"; exit 1; }
 
   local threshold
-  threshold=$(_load_yaml_threshold "${CHECKPOINT}_threshold" "${GLOBAL_THRESHOLD}")
+  # Resolve env-var fallback per checkpoint so INTEGRITY_REFLECTOR_THRESHOLD /
+  # INTEGRITY_DREAM_THRESHOLD are honoured when no YAML config is present.
+  local _env_threshold
+  case "$CHECKPOINT" in
+    reflector) _env_threshold="$REFLECTOR_THRESHOLD" ;;
+    dream)     _env_threshold="$DREAM_THRESHOLD"     ;;
+    *)         _env_threshold="$GLOBAL_THRESHOLD"    ;;
+  esac
+  threshold=$(_load_yaml_threshold "${CHECKPOINT}_threshold" "$_env_threshold")
 
   log "capture: sampling $SAMPLE_N observations from $obs_file (checkpoint=$CHECKPOINT)"
 
