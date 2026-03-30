@@ -147,19 +147,22 @@ _embed() {
 }
 
 # Cosine similarity between two JSON float arrays (Python required for float math)
+# Vectors are passed via stdin as a JSON object {"a": [...], "b": [...]} to avoid
+# heredoc quoting fragility with triple-quote embedding.
 _cosine_sim() {
   local vec_a="$1"
   local vec_b="$2"
-  python3 - <<PYEOF
-import json, math
-a = json.loads("""$vec_a""")
-b = json.loads("""$vec_b""")
+  jq -n --argjson a "$vec_a" --argjson b "$vec_b" '{"a":$a,"b":$b}' | \
+  python3 -c "
+import json, math, sys
+data = json.load(sys.stdin)
+a, b = data['a'], data['b']
 dot = sum(x*y for x,y in zip(a,b))
 mag_a = math.sqrt(sum(x*x for x in a))
 mag_b = math.sqrt(sum(y*y for y in b))
 denom = mag_a * mag_b
 print(round(dot / denom, 4) if denom > 0 else 0.0)
-PYEOF
+"
 }
 
 # Randomly sample N lines from a file (one observation per line kept as-is)
@@ -167,7 +170,14 @@ _sample_observations() {
   local obs_file="$1"
   local n="$2"
   # Treat each non-empty line as one "observation unit"
-  grep -v '^[[:space:]]*$' "$obs_file" | shuf -n "$n" 2>/dev/null || grep -v '^[[:space:]]*$' "$obs_file" | head -n "$n"
+  # shuf is GNU coreutils (unavailable on macOS by default); fall back to head -n
+  # with a warning so callers know sampling is deterministic in that case.
+  if command -v shuf &>/dev/null; then
+    grep -v '^[[:space:]]*$' "$obs_file" | shuf -n "$n"
+  else
+    log "WARN: shuf not available — falling back to deterministic first-$n sampling (install coreutils for random sampling)"
+    grep -v '^[[:space:]]*$' "$obs_file" | head -n "$n"
+  fi
 }
 
 # Append an integrity result entry to integrity-log.md
