@@ -41,11 +41,28 @@ INTEGRITY_LOG="$MEMORY_DIR/integrity-log.md"
 DREAM_LOG_DIR="$MEMORY_DIR/dream-logs"
 INTEGRITY_CFG="$SKILL_DIR/config/integrity.yaml"
 
-# Load env
+# Load env — safe line-by-line parser (no eval; values treated as data, not commands)
 if [ -f "$WORKSPACE/.env" ]; then
-  set -a
-  eval "$(grep -E '^(INTEGRITY_|GEMINI_API_KEY|GOOGLE_API_KEY|LLM_API_KEY)' "$WORKSPACE/.env" 2>/dev/null)" || true
-  set +a
+  _ALLOWED_KEYS_RE='^(INTEGRITY_[A-Z_]+|GEMINI_API_KEY|GOOGLE_API_KEY|LLM_API_KEY)$'
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    # Skip empty lines and comments
+    case "$_line" in ''|'#'*) continue ;; esac
+    # Split on first '=' only
+    _key="${_line%%=*}"
+    _val="${_line#*=}"
+    # Validate key against allowlist
+    case "$_key" in
+      INTEGRITY_*|GEMINI_API_KEY|GOOGLE_API_KEY|LLM_API_KEY) ;;
+      *) continue ;;
+    esac
+    # Strip surrounding single or double quotes from value
+    case "$_val" in
+      \"*\") _val="${_val#\"}"; _val="${_val%\"}" ;;
+      \'*\') _val="${_val#\'}"; _val="${_val%\'}" ;;
+    esac
+    export "$_key=$_val"
+  done < "$WORKSPACE/.env"
+  unset _line _key _val _ALLOWED_KEYS_RE
 fi
 
 # Config defaults (can be overridden by integrity.yaml or env)
@@ -301,6 +318,7 @@ cmd_verify() {
 
   if [ ! -f "$state_in" ]; then
     log "verify: no pre-capture state found at $state_in — nothing to verify"
+    echo "{\"status\":\"skipped\",\"reason\":\"missing_pre_state\",\"checkpoint\":\"$CHECKPOINT\"}"
     exit 0
   fi
 
@@ -312,6 +330,7 @@ cmd_verify() {
   if [ "$status" = "skipped" ] || [ "$status" = "dry-run" ]; then
     log "verify: pre-capture was $status — skipping verify"
     rm -f "$state_in"
+    echo "{\"status\":\"skipped\",\"reason\":\"pre_capture_${status}\",\"checkpoint\":\"$CHECKPOINT\"}"
     exit 0
   fi
 
@@ -323,12 +342,14 @@ cmd_verify() {
   if [ -z "$pre_samples" ]; then
     log "verify: no pre-capture samples found, skipping"
     rm -f "$state_in"
+    echo "{\"status\":\"skipped\",\"reason\":\"empty_pre_state\",\"checkpoint\":\"$CHECKPOINT\"}"
     exit 0
   fi
 
   if [ "$DRY_RUN" = "true" ]; then
     log "verify: dry-run mode — would verify against $obs_file"
     rm -f "$state_in"
+    echo "{\"status\":\"skipped\",\"reason\":\"dry_run\",\"checkpoint\":\"$CHECKPOINT\"}"
     exit 0
   fi
 
@@ -394,10 +415,10 @@ cmd_verify() {
     below=$(python3 -c "print(1 if $best_sim < $threshold else 0)")
     if [ "$below" = "1" ]; then
       ((flagged++)) || true
-      local short_text
-      short_text=$(echo "$pre_text" | cut -c1-50 | tr '\n' ' ')
-      flag_rows="${flag_rows}| \`${short_text}...\` | ${best_sim} | ⚠️ FLAGGED |\n"
-      log "flag: '${short_text}' sim=$best_sim < threshold=$threshold"
+      local artifact_id
+      artifact_id="obs-$(echo "$pre_text" | md5sum | cut -c1-8)"
+      flag_rows="${flag_rows}| \`[redacted:${artifact_id}]\` | ${best_sim} | ⚠️ FLAGGED |\n"
+      log "flag: artifact=$artifact_id sim=$best_sim < threshold=$threshold"
     fi
   done < <(echo "$state" | jq -c '.samples[]')
 
