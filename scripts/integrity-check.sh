@@ -57,7 +57,7 @@ DREAM_THRESHOLD="${INTEGRITY_DREAM_THRESHOLD:-$GLOBAL_THRESHOLD}"
 BLOCK_ON_FLAG="${INTEGRITY_BLOCK_ON_FLAG:-false}"
 
 # Gemini Embedding 2 endpoint
-GEMINI_EMBED_MODEL="text-embedding-004"
+GEMINI_EMBED_MODEL="gemini-embedding-2-preview"
 GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
 
 CHECKPOINT="${1:-}"  # "reflector" or "dream"
@@ -107,7 +107,8 @@ _embed() {
   payload=$(jq -n \
     --arg text "$text" \
     --arg task "$task_type" \
-    '{"model": "models/text-embedding-004", "content": {"parts": [{"text": $text}]}, "taskType": $task}')
+    --arg model "models/${GEMINI_EMBED_MODEL}" \
+    '{"model": $model, "content": {"parts": [{"text": $text}]}, "taskType": $task}')
 
   local response
   response=$(curl -s --max-time 30 \
@@ -176,7 +177,7 @@ _write_integrity_log() {
     else
       echo "**Integrity check:** FLAG (${flagged}/${samples_checked} samples below threshold)"
       echo ""
-      echo "$flag_table"
+      printf "%b\n" "$flag_table"
     fi
     echo ""
     echo "---"
@@ -246,6 +247,14 @@ cmd_capture() {
     exit 0
   fi
 
+  # Without an API key no embeddings can be obtained — mark skipped immediately
+  if [ -z "$GEMINI_API_KEY" ]; then
+    log "capture: GEMINI_API_KEY not set — skipping embedding"
+    echo '{"status":"skipped","reason":"no_api_key"}' > "$state_out"
+    echo '{"status":"skipped","captured":0}'
+    exit 0
+  fi
+
   # Build JSON array of {text, embedding} pairs
   local entries='[]'
   local i=0
@@ -270,7 +279,13 @@ cmd_capture() {
     '{"captured_at": $ts, "checkpoint": $checkpoint, "threshold": $threshold, "samples": $entries}' \
     > "$state_out"
 
-  echo "{\"status\":\"ok\",\"captured\":$captured_count}"
+  if [ "$captured_count" -eq 0 ]; then
+    log "capture: 0 embeddings obtained — marking state as skipped"
+    echo '{"status":"skipped","reason":"captured_zero"}' > "$state_out"
+    echo "{\"status\":\"skipped\",\"captured\":0}"
+  else
+    echo "{\"status\":\"ok\",\"captured\":$captured_count}"
+  fi
 }
 
 # ─── Phase: Verify post-compression similarity ───────────────────────────────
@@ -425,6 +440,13 @@ if [ "$INTEGRITY_ENABLED" != "true" ]; then
 fi
 
 [ -n "$CHECKPOINT" ] || { err "Usage: integrity-check.sh <reflector|dream> [--dry-run] <capture|verify> [args...]"; exit 1; }
+
+# Validate CHECKPOINT against exact known values to prevent downstream filenames
+# (.integrity-pre-$CHECKPOINT.json) from being created with bogus values
+case "$CHECKPOINT" in
+  reflector|dream) ;;
+  *) err "Unknown checkpoint: $CHECKPOINT (expected 'reflector' or 'dream')"; exit 1 ;;
+esac
 
 # Parse remaining args: [--dry-run] <command> [arg1] [arg2]
 REMAINING_ARGS=()
