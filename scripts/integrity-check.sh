@@ -409,23 +409,22 @@ cmd_verify() {
     pre_vec=$(echo "$pre_entry" | jq -c '.embedding')
 
     # Find the best-matching post embedding (maximum cosine similarity)
+    # Use awk for float comparisons to avoid O(n²) python3 subprocess overhead.
     local best_sim="0.0"
     for post_vec in "${post_vecs[@]}"; do
       local sim
       sim=$(_cosine_sim "$pre_vec" "$post_vec") || continue
-      # Keep max
-      best_sim=$(python3 -c "print(max($best_sim, $sim))")
+      # Keep max — awk avoids a python3 subprocess per iteration
+      best_sim=$(awk "BEGIN{print ($sim > $best_sim) ? $sim : $best_sim}")
     done
 
     ((samples_checked++)) || true
 
-    # Update running minimum
-    min_sim=$(python3 -c "print(min($min_sim, $best_sim))")
+    # Update running minimum (awk, not python3 — no subprocess per sample)
+    min_sim=$(awk "BEGIN{print ($best_sim < $min_sim) ? $best_sim : $min_sim}")
 
-    # Check threshold
-    local below
-    below=$(python3 -c "print(1 if $best_sim < $threshold else 0)")
-    if [ "$below" = "1" ]; then
+    # Check threshold (awk inline float comparison, no subprocess)
+    if awk "BEGIN{exit ($best_sim < $threshold) ? 0 : 1}"; then
       ((flagged++)) || true
       local artifact_id
       artifact_id="obs-$(echo "$pre_text" | md5sum | cut -c1-8)"
