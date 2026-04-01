@@ -1,5 +1,7 @@
 # Total Recall
 
+> **Note (April 2026):** This project is currently on hold. I'm focusing on other work for the foreseeable future. The code works, the docs are accurate, and issues/PRs are welcome, but response times will be slower than usual. See [#21](https://github.com/gavdalf/total-recall/issues/21) for details.
+
 Autonomous memory for OpenClaw-style agents.
 
 Total Recall v2.0 keeps the existing v1.x stack intact:
