@@ -315,3 +315,7 @@ See:
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
+## Download History
+
+[![Download History](https://skill-history.com/chart/gavdalf/total-recall.svg)](https://skill-history.com/gavdalf/total-recall)
