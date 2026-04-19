@@ -29,7 +29,7 @@ iso_to_epoch() {
 
 hash_text() {
   local text="$1"
-  printf '%s' "$text" | sha256sum | awk '{print $1}'
+  printf '%s' "$text" | sha256_hash
 }
 
 load_env() {

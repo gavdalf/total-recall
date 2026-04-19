@@ -76,12 +76,25 @@ if [[ -z "$DRY_RUN" ]]; then
   if [[ -n "$CUTOFF" ]]; then
     BUS_LINES_BEFORE=$(wc -l < "$BUS" 2>/dev/null || echo 0)
     TMP_PRUNED=$(mktemp "${BUS}.prune.XXXXXX")
-    (
-      flock -x 200
+    if command -v flock &>/dev/null; then
+      (
+        flock -x 200
+        jq -c --arg cutoff "$CUTOFF" \
+          'select(.consumed == false or .timestamp > $cutoff)' \
+          "$BUS" > "$TMP_PRUNED" 2>/dev/null && mv "$TMP_PRUNED" "$BUS"
+      ) 200>"$BUS_LOCK"
+    else
+      local lock_dir="${BUS_LOCK}.d" retries=0
+      while ! mkdir "$lock_dir" 2>/dev/null; do
+        retries=$((retries + 1))
+        if ((retries > 50)); then rm -rf "$lock_dir"; mkdir "$lock_dir" 2>/dev/null || true; break; fi
+        sleep 0.1
+      done
       jq -c --arg cutoff "$CUTOFF" \
         'select(.consumed == false or .timestamp > $cutoff)' \
         "$BUS" > "$TMP_PRUNED" 2>/dev/null && mv "$TMP_PRUNED" "$BUS"
-    ) 200>"$BUS_LOCK"
+      rm -rf "$lock_dir"
+    fi
     BUS_LINES_AFTER=$(wc -l < "$BUS" 2>/dev/null || echo 0)
     PRUNED=$((BUS_LINES_BEFORE - BUS_LINES_AFTER))
     [[ $PRUNED -gt 0 ]] && log "Pruned $PRUNED consumed events (> ${PRUNE_HOURS}h old)"

@@ -160,7 +160,7 @@ emit_event() {
       payload: $payload, consumed: false, consumer_watermark: null}') || return 0
 
   if [[ -z "$DRY_RUN" ]]; then
-    if ! ( flock -w "$LOCK_WAIT_SEC" -x 200 && echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"; then
+    if ! bus_append "$BUS_LOCK" "$BUS" "$event"; then
       log "WARN: Failed to write event to bus (lock or IO error)"
       return 0
     fi
@@ -338,8 +338,25 @@ persist_sender_cache_updates() {
     return 0
   fi
 
-  (
-    flock -w "$LOCK_WAIT_SEC" -x 201 || exit 1
+  if command -v flock &>/dev/null; then
+    (
+      flock -w "$LOCK_WAIT_SEC" -x 201 || exit 1
+
+      local current sanitized merged
+      current=$(load_json_object_file "$SENDER_CACHE_FILE")
+      sanitized=$(sanitize_sender_cache "$current" "$SCORING_CACHE_THRESHOLD")
+      merged=$(apply_cache_updates "$sanitized" "$updates_json")
+
+      safe_write_json_atomic "$SENDER_CACHE_FILE" "$merged"
+    ) 201>"$SENDER_CACHE_LOCK"
+  else
+    local lock_dir="${SENDER_CACHE_LOCK}.d" retries=0
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+      retries=$((retries + 1))
+      if ((retries > 50)); then rm -rf "$lock_dir"; mkdir "$lock_dir" 2>/dev/null || true; break; fi
+      sleep 0.1
+    done
+    trap "rm -rf \"$lock_dir\"" INT TERM
 
     local current sanitized merged
     current=$(load_json_object_file "$SENDER_CACHE_FILE")
@@ -347,7 +364,8 @@ persist_sender_cache_updates() {
     merged=$(apply_cache_updates "$sanitized" "$updates_json")
 
     safe_write_json_atomic "$SENDER_CACHE_FILE" "$merged"
-  ) 201>"$SENDER_CACHE_LOCK"
+    rm -rf "$lock_dir"
+  fi
 }
 
 extract_llm_content_array() {

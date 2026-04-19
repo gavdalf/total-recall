@@ -30,7 +30,7 @@ export TMP_NOTES
 trap 'rm -f "$TMP_NOTES"' EXIT
 
 for i in 0 1 2 3 4 5 6; do
-  DAY=$(date -d "-${i} days" +%Y-%m-%d 2>/dev/null || echo "")
+  DAY=$(date_days_ago "$i")
   [[ -z "$DAY" ]] && continue
   FILE="$RUMINATION_DIR/${DAY}.jsonl"
   [[ -f "$FILE" ]] || continue

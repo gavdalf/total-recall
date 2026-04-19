@@ -158,7 +158,7 @@ EVENTS_SUMMARY=$(echo "$UNPROCESSED_JSON" | jq -r \
 # Last 72h rumination notes for deduplication
 RECENT_NOTES=""
 for i in 0 1 2; do
-  DAY_OFFSET=$(date -d "-${i} days" +%Y-%m-%d 2>/dev/null || echo "")
+  DAY_OFFSET=$(date_days_ago "$i")
   if [[ -n "$DAY_OFFSET" ]]; then
     PREV_RUM="$RUMINATION_DIR/${DAY_OFFSET}.jsonl"
     if [[ -f "$PREV_RUM" ]]; then
@@ -785,7 +785,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
   fi
 
   # ── Step 4: Prune delivered markers older than 30 days ──
-  PRUNE_CUTOFF=$(date -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+  PRUNE_CUTOFF=$(date_hours_ago 720)
   if [[ -n "$PRUNE_CUTOFF" && -f "$FOLLOWUPS_FILE" ]]; then
     TMP_PRUNE=$(mktemp "${FOLLOWUPS_FILE}.prune.XXXXXX")
     jq -c --arg cutoff "$PRUNE_CUTOFF" '
@@ -861,14 +861,29 @@ else
     # Build a JSON array of the exact event IDs we processed
     PROCESSED_IDS_JSON=$(echo "$SOURCE_IDS" | tr ',' '\n' | jq -Rn '[inputs | select(length > 0)]')
     TMP_BUS=$(mktemp "${BUS}.tmp.XXXXXX")
-    (
-      flock -x 200
+    if command -v flock &>/dev/null; then
+      (
+        flock -x 200
+        jq -c \
+          --argjson processed_ids "$PROCESSED_IDS_JSON" \
+          'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = "'"$RUN_ID"'" else . end' \
+          "$BUS" > "$TMP_BUS"
+        mv "$TMP_BUS" "$BUS"
+      ) 200>"$BUS_LOCK"
+    else
+      local lock_dir="${BUS_LOCK}.d" retries=0
+      while ! mkdir "$lock_dir" 2>/dev/null; do
+        retries=$((retries + 1))
+        if ((retries > 50)); then rm -rf "$lock_dir"; mkdir "$lock_dir" 2>/dev/null || true; break; fi
+        sleep 0.1
+      done
       jq -c \
         --argjson processed_ids "$PROCESSED_IDS_JSON" \
         'if (.consumed == false and ([.id] | inside($processed_ids))) then .consumed = true | .consumer_watermark = "'"$RUN_ID"'" else . end' \
         "$BUS" > "$TMP_BUS"
       mv "$TMP_BUS" "$BUS"
-    ) 200>"$BUS_LOCK"
+      rm -rf "$lock_dir"
+    fi
     log "Marked $EVENT_COUNT events as consumed in bus (exact IDs matched)"
   fi
 

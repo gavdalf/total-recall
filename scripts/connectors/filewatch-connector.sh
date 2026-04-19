@@ -35,7 +35,7 @@ emit_event() {
       expires_at: null, importance: $importance, actionable: false,
       payload: $payload, consumed: false, consumer_watermark: null}')
   if [[ -z "$DRY_RUN" ]]; then
-    ( flock -x 200; echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"
+    bus_append "$BUS_LOCK" "$BUS" "$event"
     log "Emitted: $type → $id"
   else
     log "[DRY-RUN] Would emit: $type | $(echo "$payload" | jq -r '.file // "?"')"

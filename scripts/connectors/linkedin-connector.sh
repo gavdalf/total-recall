@@ -55,7 +55,7 @@ emit_event() {
       payload: $payload, consumed: false, consumer_watermark: null}') || return 0
 
   if [[ -z "$DRY_RUN" ]]; then
-    if ! ( flock -w "$LOCK_WAIT_SEC" -x 200 && echo "$event" >> "$BUS" ) 200>"$BUS_LOCK"; then
+    if ! bus_append "$BUS_LOCK" "$BUS" "$event"; then
       log "WARN: Failed to write event to bus"
       return 0
     fi

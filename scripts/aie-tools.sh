@@ -237,7 +237,7 @@ run_tool() {
         to=$(echo "$query" | awk -F'|' '{print $2}')
       fi
       [[ -z "$from" ]] && from="$(date +%Y-%m-%d)"
-      [[ -z "$to" ]] && to="$(date -d '+2 days' +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d)"
+      [[ -z "$to" ]] && to="$(date_add_days 2)"
       if [[ -z "$CALENDAR_ACCOUNT" || -z "$CALENDAR_KEYRING_PASSWORD" ]]; then
         echo '{"status":"error","error":"calendar_lookup_not_configured"}'
       else
