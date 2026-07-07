@@ -94,19 +94,20 @@ BACKUP_FILE="$BACKUP_DIR/observations-$(date '+%Y%m%d-%H%M%S').md"
 cp "$OBSERVATIONS_FILE" "$BACKUP_FILE"
 log "Backed up to $BACKUP_FILE"
 
-CURRENT_OBS=$(cat "$OBSERVATIONS_FILE")
 SYSTEM_PROMPT=$(cat "$REFLECTOR_PROMPT")
 TODAY=$(date '+%Y-%m-%d')
 
+# --rawfile: pass observations via file, not argv (18MB file once hit ARG_MAX: "Argument list too long")
 PAYLOAD=$(jq -n \
   --arg system "$SYSTEM_PROMPT" \
-  --arg obs "Today is $TODAY. Here is the current observation log to consolidate:\n\n$CURRENT_OBS" \
+  --arg today "$TODAY" \
+  --rawfile obs "$OBSERVATIONS_FILE" \
   --arg model "$REFLECTOR_MODEL" \
   '{
     model: $model,
     messages: [
       {role: "system", content: $system},
-      {role: "user", content: $obs}
+      {role: "user", content: ("Today is " + $today + ". Here is the current observation log to consolidate:\n\n" + $obs)}
     ],
     max_tokens: 4000,
     temperature: 0.2
