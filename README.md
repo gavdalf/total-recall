@@ -1,5 +1,7 @@
 # Total Recall
 
+[![AgentShield Security](https://merx.help/badge/A+.svg)](https://merx.help/shield)
+
 > **Note (April 2026):** This project is currently on hold. I'm focusing on other work for the foreseeable future. The code works, the docs are accurate, and issues/PRs are welcome, but response times will be slower than usual. See [#22](https://github.com/gavdalf/total-recall/issues/22) for details.
 
 Autonomous memory for OpenClaw-style agents.
